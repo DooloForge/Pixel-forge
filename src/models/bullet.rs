@@ -1,5 +1,6 @@
 use crate::math::Vec2;
-use crate::constants::BULLET_SPEED;
+
+const BULLET_SPEED: f32 = 10.0;
 
 #[turbo::serialize]
 pub struct Bullet {

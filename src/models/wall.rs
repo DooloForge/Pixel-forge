@@ -1,6 +1,6 @@
 use turbo::*;   
 use crate::math::Vec2 as V2;
-use crate::constants::{PIXEL_SIZE, PIXEL_WALL_COLOR};
+use crate::constants::PIXEL_SIZE;
 
 #[turbo::serialize]
 pub struct Wall {

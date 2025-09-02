@@ -1,3 +1,6 @@
+use super::*;
+
+#[derive (Copy, PartialEq, Default)]
 #[turbo::serialize]
 pub struct Vec2 {
     pub x: f32,
@@ -29,6 +32,12 @@ impl Vec2 {
         (self.x * self.x + self.y * self.y).sqrt()
     }
     
+    pub fn distance_to(&self, other: &Vec2) -> f32 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        (dx * dx + dy * dy).sqrt()
+    }
+    
     pub fn normalize(&self) -> Vec2 {
         let len = self.length();
         if len > 0.0 {
@@ -36,5 +45,9 @@ impl Vec2 {
         } else {
             Vec2::zero()
         }
+    }
+    
+    pub fn scale(&self, scalar: f32) -> Vec2 {
+        self.mul(scalar)
     }
 }
