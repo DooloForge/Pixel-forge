@@ -51,3 +51,22 @@ impl Vec2 {
         self.mul(scalar)
     }
 }
+
+#[derive (Copy, PartialEq, Default)]
+#[turbo::serialize]
+pub struct Vec3 {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl Vec3 {
+    pub fn new(x: f32, y: f32, z: f32) -> Self { Self { x, y, z } }
+    pub fn zero() -> Self { Self { x: 0.0, y: 0.0, z: 0.0 } }
+    pub fn add(&self, other: Vec3) -> Vec3 { Vec3::new(self.x + other.x, self.y + other.y, self.z + other.z) }
+    pub fn sub(&self, other: Vec3) -> Vec3 { Vec3::new(self.x - other.x, self.y - other.y, self.z - other.z) }
+    pub fn scale(&self, s: f32) -> Vec3 { Vec3::new(self.x * s, self.y * s, self.z * s) }
+}
+
+pub fn project_topdown(p: Vec3) -> Vec2 { Vec2::new(p.x, p.y) }
+pub fn project_dive(p: Vec3) -> Vec2 { Vec2::new(p.x, p.z) }

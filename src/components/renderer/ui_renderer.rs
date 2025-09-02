@@ -7,6 +7,8 @@ use crate::constants::*;
 pub struct UIRenderer {
     ui_elements: Vec<UIElement>,
     current_ui_mode: UIMode,
+    hud_state: Option<HudState>,
+    minimap_points: Vec<MinimapPoint>,
 }
 
 impl UIRenderer {
@@ -14,12 +16,24 @@ impl UIRenderer {
         Self {
             ui_elements: Vec::new(),
             current_ui_mode: UIMode::Playing,
+            hud_state: None,
+            minimap_points: Vec::new(),
         }
     }
     
     /// Set UI mode
     pub fn set_ui_mode(&mut self, mode: UIMode) {
         self.current_ui_mode = mode;
+    }
+
+    /// Set HUD dynamic values
+    pub fn set_hud_state(&mut self, state: HudState) {
+        self.hud_state = Some(state);
+    }
+
+    /// Set minimap points (world-space projected externally)
+    pub fn set_minimap_points(&mut self, points: Vec<MinimapPoint>) {
+        self.minimap_points = points;
     }
     
     /// Add UI element
@@ -48,21 +62,39 @@ impl UIRenderer {
     /// Render HUD for playing mode
     fn render_hud(&self) {
         let (screen_w, _screen_h) = resolution();
-        
-        // Tool info
-        text!("Tool: Hook", x = 10, y = 10, color = UI_TEXT_WHITE, fixed = true);
-        
-        // Survival stats
-        text!("Health: 100/100", x = 10, y = 26, color = UI_TEXT_RED, fixed = true);
-        text!("Hunger: 85/100", x = 10, y = 42, color = UI_TEXT_ORANGE, fixed = true);
-        text!("Thirst: 72/100", x = 10, y = 58, color = UI_TEXT_BLUE, fixed = true);
+        if let Some(hud) = &self.hud_state {
+            // Tool info
+            let t1 = format!("Tool: {}", hud.tool);
+            text!(t1.as_str(), x = 10, y = 10, color = UI_TEXT_WHITE, fixed = true);
+            // Survival stats
+            let t2 = format!("Health: {}/100", hud.health as i32);
+            let t3 = format!("Hunger: {}/100", hud.hunger as i32);
+            let t4 = format!("Thirst: {}/100", hud.thirst as i32);
+            text!(t2.as_str(), x = 10, y = 26, color = UI_TEXT_RED, fixed = true);
+            text!(t3.as_str(), x = 10, y = 42, color = UI_TEXT_ORANGE, fixed = true);
+            text!(t4.as_str(), x = 10, y = 58, color = UI_TEXT_BLUE, fixed = true);
+            // Game status
+            let t5 = format!("Status: {}", hud.status);
+            text!(t5.as_str(), x = 10, y = 130, color = UI_TEXT_WHITE, fixed = true);
+            // Positions (optional)
+            if let Some(p) = &hud.player_pos {
+                text!(p.as_str(), x = 10, y = 146, color = UI_TEXT_WHITE, fixed = true);
+            }
+            if let Some(r) = &hud.raft_pos {
+                text!(r.as_str(), x = 10, y = 162, color = UI_TEXT_WHITE, fixed = true);
+            }
+        } else {
+            // Fallback placeholders
+            text!("Tool: Hook", x = 10, y = 10, color = UI_TEXT_WHITE, fixed = true);
+            text!("Health: 100/100", x = 10, y = 26, color = UI_TEXT_RED, fixed = true);
+            text!("Hunger: 100/100", x = 10, y = 42, color = UI_TEXT_ORANGE, fixed = true);
+            text!("Thirst: 100/100", x = 10, y = 58, color = UI_TEXT_BLUE, fixed = true);
+            text!("Status: --", x = 10, y = 130, color = UI_TEXT_WHITE, fixed = true);
+        }
         
         // Controls
         text!("WASD: Move, E: Switch Tool, F: Eat", x = 10, y = 90, color = UI_TEXT_WHITE, fixed = true);
         text!("I: Inventory, C: Crafting", x = 10, y = 106, color = UI_TEXT_WHITE, fixed = true);
-        
-        // Game status
-        text!("Status: On Raft", x = 10, y = 130, color = UI_TEXT_WHITE, fixed = true);
         
         // Minimap
         self.render_minimap(screen_w);
@@ -234,15 +266,10 @@ impl UIRenderer {
             fixed = true
         );
         
-        // Player dot (center)
-        let center_x = minimap_x + minimap_size * 0.5;
-        let center_y = minimap_y + minimap_size * 0.5;
-        circ!(
-            d = 3.0,
-            position = (center_x, center_y),
-            color = PLAYER_ON_RAFT_COLOR,
-            fixed = true
-        );
+        // Points (already projected to minimap space)
+        for p in &self.minimap_points {
+            circ!(d = p.size, position = (minimap_x + p.x, minimap_y + p.y), color = p.color, fixed = true);
+        }
         
         // Minimap title
         text!("Map", x = minimap_x, y = minimap_y - 12.0, color = UI_TEXT_WHITE, fixed = true);
@@ -276,6 +303,25 @@ impl UIRenderer {
         }
         None
     }
+}
+
+#[turbo::serialize]
+pub struct HudState {
+    pub tool: String,
+    pub health: f32,
+    pub hunger: f32,
+    pub thirst: f32,
+    pub status: String,
+    pub player_pos: Option<String>,
+    pub raft_pos: Option<String>,
+}
+
+#[turbo::serialize]
+pub struct MinimapPoint {
+    pub x: f32,
+    pub y: f32,
+    pub size: f32,
+    pub color: u32,
 }
 
 /// UI modes

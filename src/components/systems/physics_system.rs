@@ -83,6 +83,11 @@ impl PhysicsSystem {
         self.wind = direction.normalize().scale(strength);
     }
     
+    /// Get current wind vector
+    pub fn get_wind(&self) -> V2 {
+        self.wind.clone()
+    }
+    
     /// Add water current
     pub fn add_water_current(&mut self, position: V2, direction: V2, strength: f32) {
         self.water_currents.push(WaterCurrent {

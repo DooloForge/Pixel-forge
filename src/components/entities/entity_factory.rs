@@ -1,12 +1,13 @@
-use crate::components::entities::game_entity::{GameEntity, EntityType, RenderData, RenderLayer, HealthComponent, InventoryComponent, StatsComponent};
+use crate::components::entities::game_entity::{Entity, RenderData, RenderLayer, HealthComponent, StatsComponent};
 use crate::math::Vec2 as V2;
 use crate::models::player::Player;
 use crate::models::raft::Raft;
 use crate::models::ocean::FloatingItemType;
 use crate::constants::*;
-use super::*;
+// use super::*;
 
 /// Factory for creating different types of game entities
+#[turbo::serialize]
 pub struct EntityFactory {
     next_entity_id: u32,
 }
@@ -19,35 +20,35 @@ impl EntityFactory {
     }
     
     /// Create a player entity
-    pub fn create_player(&mut self, position: V2) -> Box<dyn GameEntity> {
+    pub fn create_player(&mut self, position: V2) -> Entity {
         let player = Player::new(position);
-        Box::new(PlayerEntity::new(self.next_entity_id(), player))
+        Entity::Player(PlayerEntity::new(self.next_entity_id(), player))
     }
     
     /// Create a raft entity
-    pub fn create_raft(&mut self, position: V2) -> Box<dyn GameEntity> {
+    pub fn create_raft(&mut self, position: V2) -> Entity {
         let raft = Raft::new(position);
-        Box::new(RaftEntity::new(self.next_entity_id(), raft))
+        Entity::Raft(RaftEntity::new(self.next_entity_id(), raft))
     }
     
     /// Create a fish entity
-    pub fn create_fish(&mut self, position: V2, fish_type: FishType) -> Box<dyn GameEntity> {
-        Box::new(FishEntity::new(self.next_entity_id(), position, fish_type))
+    pub fn create_fish(&mut self, position: V2, fish_type: FishType) -> Entity {
+        Entity::Fish(FishEntity::new(self.next_entity_id(), position, fish_type))
     }
     
     /// Create a floating item entity
-    pub fn create_floating_item(&mut self, position: V2, item_type: FloatingItemType) -> Box<dyn GameEntity> {
-        Box::new(FloatingItemEntity::new(self.next_entity_id(), position, item_type))
+    pub fn create_floating_item(&mut self, position: V2, item_type: FloatingItemType) -> Entity {
+        Entity::FloatingItem(FloatingItemEntity::new(self.next_entity_id(), position, item_type))
     }
     
     /// Create a particle entity
-    pub fn create_particle(&mut self, position: V2, velocity: V2) -> Box<dyn GameEntity> {
-        Box::new(ParticleEntity::new(self.next_entity_id(), position, velocity))
+    pub fn create_particle(&mut self, position: V2, velocity: V2) -> Entity {
+        Entity::Particle(ParticleEntity::new(self.next_entity_id(), position, velocity))
     }
     
     /// Create a monster entity
-    pub fn create_monster(&mut self, position: V2, monster_type: MonsterType) -> Box<dyn GameEntity> {
-        Box::new(MonsterEntity::new(self.next_entity_id(), position, monster_type))
+    pub fn create_monster(&mut self, position: V2, monster_type: MonsterType) -> Entity {
+        Entity::Monster(MonsterEntity::new(self.next_entity_id(), position, monster_type))
     }
     
     /// Get next entity ID
@@ -59,7 +60,7 @@ impl EntityFactory {
 }
 
 /// Fish types
-#[derive(Clone, Copy, PartialEq)]
+#[turbo::serialize]
 pub enum FishType {
     SmallFish,
     TropicalFish,
@@ -68,7 +69,7 @@ pub enum FishType {
 }
 
 /// Monster types
-#[derive(Clone, Copy, PartialEq)]
+#[turbo::serialize]
 pub enum MonsterType {
     SeaMonster,
     Kraken,
@@ -76,10 +77,11 @@ pub enum MonsterType {
 }
 
 /// Player entity wrapper
+#[turbo::serialize]
 pub struct PlayerEntity {
-    id: u32,
-    player: Player,
-    render_data: RenderData,
+    pub id: u32,
+    pub player: Player,
+    pub render_data: RenderData,
 }
 
 impl PlayerEntity {
@@ -98,17 +100,7 @@ impl PlayerEntity {
     }
 }
 
-impl GameEntity for PlayerEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::Player }
-    fn get_position(&self) -> V2 { self.player.pos.clone() }
-    fn set_position(&mut self, pos: V2) { self.player.pos = pos; }
-    fn get_velocity(&self) -> V2 { self.player.vel.clone() }
-    fn set_velocity(&mut self, vel: V2) { self.player.vel = vel; }
-    fn update(&mut self, _delta_time: f32) { /* Player updates handled elsewhere */ }
-    fn should_remove(&self) -> bool { false }
-    fn get_render_data(&self) -> RenderData { self.render_data.clone() }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 
@@ -124,10 +116,11 @@ impl crate::components::systems::ai_system::AIEntity for PlayerEntity {
 }
 
 /// Raft entity wrapper
+#[turbo::serialize]
 pub struct RaftEntity {
-    id: u32,
-    raft: Raft,
-    render_data: RenderData,
+    pub id: u32,
+    pub raft: Raft,
+    pub render_data: RenderData,
 }
 
 impl RaftEntity {
@@ -146,17 +139,7 @@ impl RaftEntity {
     }
 }
 
-impl GameEntity for RaftEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::Raft }
-    fn get_position(&self) -> V2 { self.raft.center.clone() }
-    fn set_position(&mut self, pos: V2) { self.raft.center = pos; }
-    fn get_velocity(&self) -> V2 { V2::zero() } // Raft doesn't have velocity
-    fn set_velocity(&mut self, _vel: V2) { /* Raft doesn't have velocity */ }
-    fn update(&mut self, _delta_time: f32) { /* Raft updates handled elsewhere */ }
-    fn should_remove(&self) -> bool { false }
-    fn get_render_data(&self) -> RenderData { self.render_data.clone() }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 
@@ -172,15 +155,16 @@ impl crate::components::systems::ai_system::AIEntity for RaftEntity {
 }
 
 /// Fish entity
+#[turbo::serialize]
 pub struct FishEntity {
-    id: u32,
-    position: V2,
-    velocity: V2,
-    fish_type: FishType,
-    health: HealthComponent,
-    stats: StatsComponent,
-    render_data: RenderData,
-    lifetime: f32,
+    pub id: u32,
+    pub position: V2,
+    pub velocity: V2,
+    pub fish_type: FishType,
+    pub health: HealthComponent,
+    pub stats: StatsComponent,
+    pub render_data: RenderData,
+    pub lifetime: f32,
 }
 
 impl FishEntity {
@@ -215,28 +199,7 @@ impl FishEntity {
     }
 }
 
-impl GameEntity for FishEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::Fish }
-    fn get_position(&self) -> V2 { self.position.clone() }
-    fn set_position(&mut self, pos: V2) { self.position = pos; }
-    fn get_velocity(&self) -> V2 { self.velocity.clone() }
-    fn set_velocity(&mut self, vel: V2) { self.velocity = vel; }
-    fn update(&mut self, delta_time: f32) { 
-        self.position = self.position.add(self.velocity.scale(delta_time));
-        self.lifetime += delta_time;
-        self.health.update(delta_time);
-        self.stats.regenerate_stamina(delta_time);
-    }
-    fn should_remove(&self) -> bool { 
-        !self.health.is_alive() || self.lifetime > 300.0 // 5 minutes lifetime
-    }
-    fn get_render_data(&self) -> RenderData { 
-        let mut data = self.render_data.clone();
-        data.position = self.position.clone();
-        data
-    }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 
@@ -252,13 +215,14 @@ impl crate::components::systems::ai_system::AIEntity for FishEntity {
 }
 
 /// Floating item entity
+#[turbo::serialize]
 pub struct FloatingItemEntity {
-    id: u32,
-    position: V2,
-    velocity: V2,
-    item_type: FloatingItemType,
-    render_data: RenderData,
-    lifetime: f32,
+    pub id: u32,
+    pub position: V2,
+    pub velocity: V2,
+    pub item_type: FloatingItemType,
+    pub render_data: RenderData,
+    pub lifetime: f32,
 }
 
 impl FloatingItemEntity {
@@ -277,26 +241,7 @@ impl FloatingItemEntity {
     }
 }
 
-impl GameEntity for FloatingItemEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::FloatingItem }
-    fn get_position(&self) -> V2 { self.position.clone() }
-    fn set_position(&mut self, pos: V2) { self.position = pos; }
-    fn get_velocity(&self) -> V2 { self.velocity.clone() }
-    fn set_velocity(&mut self, vel: V2) { self.velocity = vel; }
-    fn update(&mut self, delta_time: f32) { 
-        self.position = self.position.add(self.velocity.scale(delta_time));
-        self.lifetime += delta_time;
-    }
-    fn should_remove(&self) -> bool { 
-        self.lifetime > 600.0 // 10 minutes lifetime
-    }
-    fn get_render_data(&self) -> RenderData { 
-        let mut data = self.render_data.clone();
-        data.position = self.position.clone();
-        data
-    }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 
@@ -312,13 +257,14 @@ impl crate::components::systems::ai_system::AIEntity for FloatingItemEntity {
 }
 
 /// Particle entity
+#[turbo::serialize]
 pub struct ParticleEntity {
-    id: u32,
-    position: V2,
-    velocity: V2,
-    render_data: RenderData,
-    lifetime: f32,
-    max_lifetime: f32,
+    pub id: u32,
+    pub position: V2,
+    pub velocity: V2,
+    pub render_data: RenderData,
+    pub lifetime: f32,
+    pub max_lifetime: f32,
 }
 
 impl ParticleEntity {
@@ -337,35 +283,7 @@ impl ParticleEntity {
     }
 }
 
-impl GameEntity for ParticleEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::Particle }
-    fn get_position(&self) -> V2 { self.position.clone() }
-    fn set_position(&mut self, pos: V2) { self.position = pos; }
-    fn get_velocity(&self) -> V2 { self.velocity.clone() }
-    fn set_velocity(&mut self, vel: V2) { self.velocity = vel; }
-    fn update(&mut self, delta_time: f32) { 
-        self.position = self.position.add(self.velocity.scale(delta_time));
-        self.lifetime += delta_time;
-        
-        // Apply gravity
-        self.velocity.y += GRAVITY * delta_time;
-    }
-    fn should_remove(&self) -> bool { 
-        self.lifetime > self.max_lifetime
-    }
-    fn get_render_data(&self) -> RenderData { 
-        let mut data = self.render_data.clone();
-        data.position = self.position.clone();
-        
-        // Fade out based on lifetime
-        let alpha = ((self.max_lifetime - self.lifetime) / self.max_lifetime) as u32;
-        let color = (data.color & 0x00FFFFFF) | (alpha << 24);
-        data.color = color;
-        
-        data
-    }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 
@@ -381,14 +299,15 @@ impl crate::components::systems::ai_system::AIEntity for ParticleEntity {
 }
 
 /// Monster entity
+#[turbo::serialize]
 pub struct MonsterEntity {
-    id: u32,
-    position: V2,
-    velocity: V2,
-    monster_type: MonsterType,
-    health: HealthComponent,
-    stats: StatsComponent,
-    render_data: RenderData,
+    pub id: u32,
+    pub position: V2,
+    pub velocity: V2,
+    pub monster_type: MonsterType,
+    pub health: HealthComponent,
+    pub stats: StatsComponent,
+    pub render_data: RenderData,
 }
 
 impl MonsterEntity {
@@ -414,27 +333,7 @@ impl MonsterEntity {
     }
 }
 
-impl GameEntity for MonsterEntity {
-    fn get_id(&self) -> u32 { self.id }
-    fn get_entity_type(&self) -> EntityType { EntityType::Monster }
-    fn get_position(&self) -> V2 { self.position.clone() }
-    fn set_position(&mut self, pos: V2) { self.position = pos; }
-    fn get_velocity(&self) -> V2 { self.velocity.clone() }
-    fn set_velocity(&mut self, vel: V2) { self.velocity = vel; }
-    fn update(&mut self, delta_time: f32) { 
-        self.position = self.position.add(self.velocity.scale(delta_time));
-        self.health.update(delta_time);
-        self.stats.regenerate_stamina(delta_time);
-    }
-    fn should_remove(&self) -> bool { 
-        !self.health.is_alive()
-    }
-    fn get_render_data(&self) -> RenderData { 
-        let mut data = self.render_data.clone();
-        data.position = self.position.clone();
-        data
-    }
-}
+// GameEntity trait removed; behavior handled via Entity enum
 
 
 

@@ -1,6 +1,6 @@
 use super::*;
-use crate::math::Vec2 as V2;
-use crate::components::entities::game_entity::{GameEntity, RenderData, RenderLayer};
+use crate::math::{Vec2 as V2, project_topdown, project_dive};
+use crate::components::entities::game_entity::{Entity, EntityType, RenderData, RenderLayer};
 // CameraSystem removed; use turbo camera API directly
 // use crate::constants::*;
 
@@ -44,12 +44,18 @@ impl RenderSystem {
     }
     
     /// Add entity to render queue
-    pub fn add_entity(&mut self, entity: &dyn GameEntity) {
-        let render_data = entity.get_render_data();
+    pub fn add_entity(&mut self, entity: &Entity) {
+        let mut render_data = entity.get_render_data();
+        // Project world position into current view so we use a single world-space coordinate
+        let world_pos = entity.get_world_position();
+        render_data.position = match self.view_mode {
+            RenderViewMode::TopDown => project_topdown(world_pos),
+            RenderViewMode::SideScroll => project_dive(world_pos),
+        };
         if render_data.visible {
             let command = RenderCommand::Entity {
                 data: render_data.clone(),
-                entity_type: GameEntity::get_entity_type(entity),
+                entity_type: entity.get_entity_type(),
             };
             self.render_queue.push(command);
         }
@@ -69,7 +75,7 @@ impl RenderSystem {
         self.last_player_pos = None;
         for command in &self.render_queue {
             if let RenderCommand::Entity { data, entity_type } = command {
-                if let crate::components::entities::game_entity::EntityType::Player = entity_type {
+                if let EntityType::Player = entity_type {
                     self.last_player_pos = Some(data.position.clone());
                     break;
                 }
@@ -91,7 +97,23 @@ impl RenderSystem {
                 RenderCommand::Background { layer, .. } => *layer,
                 RenderCommand::UI { layer, .. } => *layer,
             };
-            layer_a.cmp(&layer_b)
+            // Force player and raft to render on top
+            let bias = |layer: RenderLayer, cmd: &RenderCommand| -> i32 {
+                match cmd {
+                    RenderCommand::Entity { entity_type, .. } => match entity_type {
+                        EntityType::Player => 2,
+                        EntityType::Raft => 1,
+                        _ => 0,
+                    },
+                    _ => 0,
+                }
+            };
+            let ord = layer_a.cmp(&layer_b);
+            if ord == std::cmp::Ordering::Equal {
+                let ba = bias(layer_a, a);
+                let bb = bias(layer_b, b);
+                ba.cmp(&bb)
+            } else { ord }
         });
         
         // Render background layers
@@ -258,7 +280,7 @@ impl RenderSystem {
     }
     
     /// Render a single entity
-    fn render_entity(&self, data: &RenderData, entity_type: &crate::components::entities::game_entity::EntityType, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_entity(&self, data: &RenderData, entity_type: &EntityType, camera_pos: &V2, screen_w: u32, screen_h: u32) {
         let screen_x = data.position.x - camera_pos.x + screen_w as f32 * 0.5;
         let screen_y = data.position.y - camera_pos.y + screen_h as f32 * 0.5;
         
@@ -267,25 +289,25 @@ impl RenderSystem {
            screen_y > -data.size && screen_y < screen_h as f32 + data.size {
             
             match entity_type {
-                crate::components::entities::game_entity::EntityType::Player => {
+                EntityType::Player => {
                     self.render_player(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::Raft => {
+                EntityType::Raft => {
                     self.render_raft(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::Fish => {
+                EntityType::Fish => {
                     self.render_fish(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::Monster => {
+                EntityType::Monster => {
                     self.render_monster(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::Shark => {
+                EntityType::Shark => {
                     self.render_shark(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::FloatingItem => {
+                EntityType::FloatingItem => {
                     self.render_floating_item(screen_x, screen_y, data);
                 },
-                crate::components::entities::game_entity::EntityType::Particle => {
+                EntityType::Particle => {
                     self.render_particle(screen_x, screen_y, data);
                 },
                 _ => {
@@ -497,7 +519,7 @@ pub enum BackgroundLayer {
 pub enum RenderCommand {
     Entity {
         data: RenderData,
-        entity_type: crate::components::entities::game_entity::EntityType,
+        entity_type: EntityType,
     },
     Background {
         layer: RenderLayer,

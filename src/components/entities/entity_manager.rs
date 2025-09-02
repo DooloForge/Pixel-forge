@@ -1,6 +1,5 @@
-use super::*;
 use std::collections::HashMap;
-use crate::components::entities::game_entity::{GameEntity, EntityType};
+use crate::components::entities::game_entity::{Entity, EntityType};
 use crate::math::Vec2 as V2;
 
 
@@ -12,9 +11,18 @@ pub struct EntityManager {
     spatial_hash: SpatialHash,
 }
 
-/// Runtime entity storage (not serialized)
+/// Runtime entity storage
+#[derive(Default)]
+#[turbo::serialize]
 pub struct EntityStorage {
-    entities: HashMap<u32, Box<dyn GameEntity>>,
+    entities: HashMap<u32, Entity>,
+}
+impl EntityStorage {
+    pub fn new() -> Self {
+        Self {
+            entities: HashMap::new(),
+        }
+    }
 }
 
 impl EntityManager {
@@ -27,11 +35,11 @@ impl EntityManager {
     }
     
     /// Create a new entity
-    pub fn create_entity(&mut self, storage: &mut EntityStorage, entity: Box<dyn GameEntity>) -> u32 {
+    pub fn create_entity(&mut self, storage: &mut EntityStorage, entity: Entity) -> u32 {
         let entity_id = self.next_entity_id;
         self.next_entity_id += 1;
         
-        let entity_type = GameEntity::get_entity_type(&*entity);
+        let entity_type = entity.get_entity_type();
         
         // Add to entities map
         storage.entities.insert(entity_id, entity);
@@ -41,7 +49,7 @@ impl EntityManager {
         
         // Add to spatial hash
         if let Some(entity_ref) = storage.entities.get(&entity_id) {
-            self.spatial_hash.insert(entity_id, GameEntity::get_position(&**entity_ref));
+            self.spatial_hash.insert(entity_id, entity_ref.get_position());
         }
         
         entity_id
@@ -50,7 +58,7 @@ impl EntityManager {
     /// Remove an entity
     pub fn remove_entity(&mut self, storage: &mut EntityStorage, entity_id: u32) -> bool {
         if let Some(entity) = storage.entities.remove(&entity_id) {
-            let entity_type = GameEntity::get_entity_type(&*entity);
+            let entity_type = entity.get_entity_type();
             
             // Remove from type index
             if let Some(type_list) = self.entity_types.get_mut(&entity_type) {
@@ -67,17 +75,17 @@ impl EntityManager {
     }
     
     /// Get entity by ID
-    pub fn get_entity<'a>(&self, storage: &'a EntityStorage, entity_id: u32) -> Option<&'a dyn GameEntity> {
-        storage.entities.get(&entity_id).map(|e| e.as_ref())
+    pub fn get_entity<'a>(&self, storage: &'a EntityStorage, entity_id: u32) -> Option<&'a Entity> {
+        storage.entities.get(&entity_id)
     }
     
     /// Get mutable entity by ID
-    pub fn get_entity_mut<'a>(&mut self, storage: &'a mut EntityStorage, entity_id: u32) -> Option<&'a mut Box<dyn GameEntity>> {
+    pub fn get_entity_mut<'a>(&mut self, storage: &'a mut EntityStorage, entity_id: u32) -> Option<&'a mut Entity> {
         storage.entities.get_mut(&entity_id)
     }
     
     /// Get all entities of a specific type
-    pub fn get_entities_by_type<'a>(&self, storage: &'a EntityStorage, entity_type: EntityType) -> Vec<&'a dyn GameEntity> {
+    pub fn get_entities_by_type<'a>(&self, storage: &'a EntityStorage, entity_type: EntityType) -> Vec<&'a Entity> {
         if let Some(entity_ids) = self.entity_types.get(&entity_type) {
             entity_ids.iter()
                 .filter_map(|&id| self.get_entity(storage, id))
@@ -88,7 +96,7 @@ impl EntityManager {
     }
     
     /// Get all entities of a specific type (mutable)
-    pub fn get_entities_by_type_mut<'a>(&mut self, storage: &'a mut EntityStorage, entity_type: EntityType) -> Vec<&'a mut Box<dyn GameEntity>> {
+    pub fn get_entities_by_type_mut<'a>(&mut self, storage: &'a mut EntityStorage, entity_type: EntityType) -> Vec<&'a mut Entity> {
         // Return empty vector for now - this method has borrowing issues
         // Use get_entity_ids_by_type() and get_entity_mut_by_id() separately instead
         Vec::new()
@@ -104,17 +112,17 @@ impl EntityManager {
     }
     
     /// Get a single entity by ID (safe for iteration)
-    pub fn get_entity_mut_by_id<'a>(&mut self, storage: &'a mut EntityStorage, entity_id: u32) -> Option<&'a mut Box<dyn GameEntity>> {
+    pub fn get_entity_mut_by_id<'a>(&mut self, storage: &'a mut EntityStorage, entity_id: u32) -> Option<&'a mut Entity> {
         storage.entities.get_mut(&entity_id)
     }
     
     /// Get all entities
-    pub fn get_all_entities<'a>(&self, storage: &'a EntityStorage) -> Vec<&'a dyn GameEntity> {
-        storage.entities.values().map(|e| e.as_ref()).collect()
+    pub fn get_all_entities<'a>(&self, storage: &'a EntityStorage) -> Vec<&'a Entity> {
+        storage.entities.values().collect()
     }
     
     /// Get all entities (mutable)
-    pub fn get_all_entities_mut<'a>(&mut self, storage: &'a mut EntityStorage) -> Vec<&'a mut Box<dyn GameEntity>> {
+    pub fn get_all_entities_mut<'a>(&mut self, storage: &'a mut EntityStorage) -> Vec<&'a mut Entity> {
         storage.entities.values_mut().collect()
     }
     
@@ -137,7 +145,7 @@ impl EntityManager {
     }
     
     /// Get entities in a specific area
-    pub fn get_entities_in_area<'a>(&self, storage: &'a EntityStorage, center: &V2, radius: f32) -> Vec<&'a dyn GameEntity> {
+    pub fn get_entities_in_area<'a>(&self, storage: &'a EntityStorage, center: &V2, radius: f32) -> Vec<&'a Entity> {
         let entity_ids = self.spatial_hash.query_area(center, radius);
         
         entity_ids.iter()
@@ -146,7 +154,7 @@ impl EntityManager {
     }
     
     /// Get entities near a position
-    pub fn get_entities_near<'a>(&self, storage: &'a EntityStorage, position: &V2, max_distance: f32) -> Vec<&'a dyn GameEntity> {
+    pub fn get_entities_near<'a>(&self, storage: &'a EntityStorage, position: &V2, max_distance: f32) -> Vec<&'a Entity> {
         self.get_entities_in_area(storage, position, max_distance)
     }
     
@@ -170,7 +178,7 @@ impl EntityManager {
     /// Update spatial hash for an entity
     pub fn update_entity_position(&mut self, storage: &EntityStorage, entity_id: u32, new_position: V2) {
         if let Some(entity) = storage.entities.get(&entity_id) {
-            self.spatial_hash.update(entity_id, GameEntity::get_position(&**entity), new_position);
+            self.spatial_hash.update(entity_id, entity.get_position(), new_position);
         }
     }
 }

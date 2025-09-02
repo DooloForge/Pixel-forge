@@ -1,7 +1,5 @@
 use crate::math::Vec2 as V2;
-use crate::models::ocean::FloatingItemType;
 use crate::models::particle::Particle;
-use crate::constants::*;
 use turbo::random;
 
 /// Handles spawning of various game entities
@@ -10,9 +8,10 @@ pub struct SpawnSystem {
     spawn_timers: std::collections::HashMap<SpawnType, u32>,
     spawn_rates: std::collections::HashMap<SpawnType, u32>,
     max_entities: std::collections::HashMap<SpawnType, usize>,
+    pending_spawns: Vec<(SpawnType, V2)>,
 }
 
-#[derive(Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[turbo::serialize]
 pub enum SpawnType {
     FloatingItem,
@@ -45,6 +44,7 @@ impl SpawnSystem {
             spawn_timers: std::collections::HashMap::new(),
             spawn_rates,
             max_entities,
+            pending_spawns: Vec::new(),
         }
     }
     
@@ -53,27 +53,17 @@ impl SpawnSystem {
         let spawn_types = [SpawnType::FloatingItem, SpawnType::Fish, SpawnType::Bubble, SpawnType::Coral, SpawnType::Treasure];
         
         for spawn_type in spawn_types {
-            let rate = self.spawn_rates.get(&spawn_type).unwrap_or(&300);
-            let max_count = self.max_entities.get(&spawn_type).unwrap_or(&50);
-            let current_count = current_counts.get(&spawn_type).unwrap_or(&0);
+            let rate = *self.spawn_rates.get(&spawn_type).unwrap_or(&300);
+            let max_count = *self.max_entities.get(&spawn_type).unwrap_or(&50);
+            let current_count = *current_counts.get(&spawn_type).unwrap_or(&0);
             
-            // Check if we should spawn
-            let should_spawn = if let Some(timer) = self.spawn_timers.get(&spawn_type) {
-                *timer >= *rate && *current_count < *max_count
-            } else {
-                false
-            };
+            // Ensure timer exists; initialize to rate so first update can spawn immediately
+            let init = match spawn_type { SpawnType::FloatingItem | SpawnType::Fish => rate, _ => 0 };
+            let timer = self.spawn_timers.entry(spawn_type).or_insert(init);
             
-            // Update timer
-            if let Some(timer) = self.spawn_timers.get_mut(&spawn_type) {
-                if should_spawn {
-                    *timer = 0;
-                } else {
-                    *timer += 1;
-                }
-            }
+            let should_spawn = *timer >= rate && current_count < max_count;
+            if should_spawn { *timer = 0; } else { *timer += 1; }
             
-            // Trigger spawn if needed
             if should_spawn {
                 self.trigger_spawn(&spawn_type, player_pos);
             }
@@ -81,7 +71,7 @@ impl SpawnSystem {
     }
     
     /// Trigger a specific spawn type
-    fn trigger_spawn(&self, spawn_type: &SpawnType, player_pos: &V2) {
+    fn trigger_spawn(&mut self, spawn_type: &SpawnType, player_pos: &V2) {
         match spawn_type {
             SpawnType::FloatingItem => self.spawn_floating_item(player_pos),
             SpawnType::Fish => self.spawn_fish(player_pos),
@@ -93,23 +83,17 @@ impl SpawnSystem {
     }
     
     /// Spawn a floating item near the player
-    fn spawn_floating_item(&self, player_pos: &V2) {
-        let angle = random::f32() * 6.28318;
-        let distance = 100.0 + random::f32() * 200.0;
-        let spawn_pos = V2::new(
-            player_pos.x + angle.cos() * distance,
-            player_pos.y + angle.sin() * distance
-        );
-        
-        // Ensure item spawns near water surface
-        let final_pos = V2::new(spawn_pos.x, (-20.0 + random::f32() * 40.0).max(-50.0));
-        
-        // TODO: Add to floating items collection
-        // This would be handled by the Ocean system
+    fn spawn_floating_item(&mut self, player_pos: &V2) {
+        // Spawn off-screen behind the raft relative to the wind/current (assume left of player)
+        let lateral = (random::f32() - 0.5) * 200.0; // random horizontal offset
+        let x = player_pos.x - (400.0 + random::f32() * 200.0);
+        let y = (-20.0 + random::f32() * 40.0).max(-50.0) + lateral * 0.0; // keep near surface
+        let final_pos = V2::new(x, y);
+        self.pending_spawns.push((SpawnType::FloatingItem, final_pos));
     }
     
     /// Spawn a fish near the player
-    fn spawn_fish(&self, player_pos: &V2) {
+    fn spawn_fish(&mut self, player_pos: &V2) {
         let angle = random::f32() * 6.28318;
         let distance = 80.0 + random::f32() * 150.0;
         let spawn_pos = V2::new(
@@ -120,8 +104,7 @@ impl SpawnSystem {
         // Ensure fish spawns underwater
         let final_pos = V2::new(spawn_pos.x, (10.0 + random::f32() * 100.0).max(20.0));
         
-        // TODO: Add to fish collection
-        // This would be handled by the UnderwaterWorld system
+        self.pending_spawns.push((SpawnType::Fish, final_pos));
     }
     
     /// Spawn a bubble particle
@@ -166,6 +149,13 @@ impl SpawnSystem {
         
         // TODO: Add to treasure collection
         // This would be handled by the UnderwaterWorld system
+    }
+
+    /// Drain pending spawn requests
+    pub fn drain_pending(&mut self) -> Vec<(SpawnType, V2)> {
+        let mut out = Vec::new();
+        std::mem::swap(&mut out, &mut self.pending_spawns);
+        out
     }
     
     /// Spawn impact particles at a specific location

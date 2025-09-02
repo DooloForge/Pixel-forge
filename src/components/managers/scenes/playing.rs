@@ -73,14 +73,7 @@ pub fn update(gm: &mut GameManager) {
         gm.render_system.update_camera(1.0);
     }
 
-    if let Some(player) = &gm.game_state.player {
-        let player_entity = crate::components::entities::entity_factory::PlayerEntity::new(0, player.clone());
-        gm.render_system.add_entity(&player_entity);
-    }
-    if let Some(raft) = &gm.game_state.raft {
-        let raft_entity = crate::components::entities::entity_factory::RaftEntity::new(1, raft.clone());
-        gm.render_system.add_entity(&raft_entity);
-    }
+    // Entity rendering is centralized via GameManager
 
     // Rendering is centralized in GameManager.update()
 }
