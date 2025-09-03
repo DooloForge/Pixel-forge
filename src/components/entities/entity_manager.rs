@@ -49,7 +49,7 @@ impl EntityManager {
         
         // Add to spatial hash
         if let Some(entity_ref) = storage.entities.get(&entity_id) {
-            self.spatial_hash.insert(entity_id, entity_ref.get_position());
+            self.spatial_hash.insert(entity_id, entity_ref.get_world_position());
         }
         
         entity_id
@@ -178,7 +178,7 @@ impl EntityManager {
     /// Update spatial hash for an entity
     pub fn update_entity_position(&mut self, storage: &EntityStorage, entity_id: u32, new_position: V3) {
         if let Some(entity) = storage.entities.get(&entity_id) {
-            self.spatial_hash.update(entity_id, entity.get_position(), new_position);
+            self.spatial_hash.update(entity_id, entity.get_world_position(), new_position);
         }
     }
 }

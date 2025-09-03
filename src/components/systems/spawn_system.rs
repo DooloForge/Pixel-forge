@@ -89,14 +89,11 @@ impl SpawnSystem {
     
     /// Spawn a floating item near the player
     fn spawn_floating_item(&mut self, player_pos: &V3) {
-        // Spawn at screen edge opposite to wind so it flows across the view
+        // Always spawn at left edge so it flows left -> right across the view
         let (screen_w, screen_h) = turbo::resolution();
         let half_w = screen_w as f32 * 0.5;
-        let half_h = screen_h as f32 * 0.5;
         let margin = 40.0;
-        let wind_x = self.wind.x;
-        let spawn_left = if wind_x.abs() < 0.05 { random::f32() < 0.5 } else { wind_x > 0.0 };
-        let x = if spawn_left { player_pos.x - half_w - margin } else { player_pos.x + half_w + margin };
+        let x = player_pos.x - half_w - margin;
         // Near the water surface (y ~ 0)
         let y = (-4.0 + random::f32() * 8.0).clamp(-10.0, 10.0);
         let final_pos = V3::new(x, y, 0.0);
@@ -105,15 +102,15 @@ impl SpawnSystem {
     
     /// Spawn a fish near the player
     fn spawn_fish(&mut self, player_pos: &V3) {
-        // Spawn at left/right screen edges only, at underwater depths
-        let (screen_w, screen_h) = turbo::resolution();
+        // Spawn underwater using new world pos: keep y (surface), set z to negative depth
+        let (screen_w, _screen_h) = turbo::resolution();
         let half_w = screen_w as f32 * 0.5;
         let margin = 60.0;
         let left_side = random::f32() < 0.5;
         let x = if left_side { player_pos.x - half_w - margin } else { player_pos.x + half_w + margin };
-        // Underwater depth range
-        let y = (20.0 + random::f32() * (screen_h as f32 * 0.5)).max(20.0);
-        let final_pos = V3::new(x, y, 0.0);
+        let y = player_pos.y;
+        let z = -(20.0 + random::f32() * 120.0);
+        let final_pos = V3::new(x, y, z);
         self.pending_spawns.push((SpawnType::Fish, final_pos));
     }
     

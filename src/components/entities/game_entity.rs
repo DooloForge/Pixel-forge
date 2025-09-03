@@ -14,7 +14,8 @@ pub enum RenderLayer {
 
 #[turbo::serialize]
 pub struct RenderData {
-    pub position: Vec3,
+    pub screen_position: Option<(f32, f32)>,
+    pub world_position: Vec3,
     pub size: f32,
     pub color: u32,
     pub visible: bool,
@@ -22,8 +23,8 @@ pub struct RenderData {
 }
 
 impl RenderData {
-    pub fn new(position: Vec3, size: f32, color: u32) -> Self {
-        Self { position, size, color, visible: true, layer: RenderLayer::Entity }
+    pub fn new(world_position: Vec3, size: f32, color: u32) -> Self {
+        Self { screen_position: None, world_position, size, color, visible: true, layer: RenderLayer::Entity }
     }
     pub fn with_layer(mut self, layer: RenderLayer) -> Self {
         self.layer = layer;
@@ -74,7 +75,7 @@ impl Entity {
             Entity::Particle(_) => EntityType::Particle,
         }
     }
-    pub fn get_position(&self) -> Vec3 {
+    pub fn get_world_position(&self) -> Vec3 {
         match self {
             Entity::Player(e) => e.player.pos.clone(),
             Entity::Raft(e) => e.raft.center.clone(),
@@ -84,7 +85,7 @@ impl Entity {
             Entity::Particle(e) => e.position.clone(),
         }
     }
-    pub fn set_position(&mut self, pos: Vec3) {
+    pub fn set_world_position(&mut self, pos: Vec3) {
         match self {
             Entity::Player(e) => { e.player.pos = pos; }
             Entity::Raft(e) => { e.raft.center = pos; }
@@ -95,18 +96,17 @@ impl Entity {
         }
     }
 
-    pub fn get_world_position(&self) -> Vec3 {
+    pub fn get_render_data(&self) -> RenderData {
         match self {
-            // Use player's actual world z (depth), not derived depth value
-            Entity::Player(e) => Vec3::new(e.player.pos.x, e.player.pos.y, e.player.pos.z),
-            Entity::Raft(e) => Vec3::new(e.raft.center.x, e.raft.center.y, 0.0),
-            Entity::Fish(e) => Vec3::new(e.position.x, 0.0, e.position.y),
-            Entity::Monster(e) => Vec3::new(e.position.x, 0.0, e.position.y),
-            Entity::FloatingItem(e) => Vec3::new(e.position.x, e.position.y, 0.0),
-            Entity::Particle(e) => Vec3::new(e.position.x, e.position.y, 0.0),
+            Entity::Player(e) => e.render_data.clone(),
+            Entity::Raft(e) => e.render_data.clone(),
+            Entity::Fish(e) => e.render_data.clone(),
+            Entity::Monster(e) => e.render_data.clone(),
+            Entity::FloatingItem(e) => e.render_data.clone(),
+            Entity::Particle(e) => e.render_data.clone(),
         }
     }
-    
+
     pub fn get_velocity(&self) -> Vec3 {
         match self {
             Entity::Player(e) => e.player.vel.clone(),
@@ -129,7 +129,9 @@ impl Entity {
     }
     pub fn update(&mut self, delta_time: f32) {
         match self {
-            Entity::Player(_e) => {},
+            Entity::Player(e) => {
+                e.render_data.world_position = e.player.pos.clone();
+            },
             Entity::Raft(_e) => {},
             Entity::Fish(e) => {
                 e.position = e.position.add(e.velocity.scale(delta_time));
@@ -166,40 +168,6 @@ impl Entity {
             Entity::FloatingItem(e) => e.lifetime > 600.0,
             Entity::Particle(e) => e.lifetime > e.max_lifetime,
             _ => false,
-        }
-    }
-    pub fn get_render_data(&self) -> RenderData {
-        match self {
-            Entity::Player(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.player.pos.clone();
-                data
-            }
-            Entity::Raft(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.raft.center.clone();
-                data
-            }
-            Entity::Fish(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.position.clone();
-                data
-            }
-            Entity::Monster(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.position.clone();
-                data
-            }
-            Entity::FloatingItem(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.position.clone();
-                data
-            }
-            Entity::Particle(e) => {
-                let mut data = e.render_data.clone();
-                data.position = e.position.clone();
-                data
-            }
         }
     }
 }

@@ -15,20 +15,14 @@ pub fn update(gm: &mut GameManager) {
         super::super::game_manager::apply_player_input(player, &input_state, &movement);
         super::super::game_manager::apply_physics_update(player, &water_current, gm.delta_time);
 
-        let check_pos = if gm.game_state.game_mode == super::super::game_manager::GameMode::Dive {
-            gm.game_state.last_surface_pos.clone()
-        } else {
-            player.pos.clone()
-        };
-        player.on_raft = raft.is_on_raft(&check_pos);
+        player.on_raft = raft.is_on_raft(&player.pos);
 
         let mut new_mode = gm.game_state.game_mode;
         if input_state.dive && gm.game_state.game_mode != super::super::game_manager::GameMode::Dive {
             new_mode = super::super::game_manager::GameMode::Dive;
-            gm.game_state.last_surface_pos = player.pos.clone();
             if let Some(raft_ref) = &gm.game_state.raft {
                 let offset = crate::math::Vec3::new(player.pos.x - raft_ref.center.x, player.pos.y - raft_ref.center.y, 0.0);
-                gm.render_system.set_dive_offset(offset);
+                gm.render_system.set_camera_target(player.pos);
             }
             // Start diving by moving into depth (z axis), keep top-down y at surface
             player.pos.z = -10.0;
@@ -43,10 +37,10 @@ pub fn update(gm: &mut GameManager) {
             player.is_diving = player.pos.z < 0.0;
             if player.pos.z >= 0.0 {
                 new_mode = super::super::game_manager::GameMode::Raft;
-                player.pos = gm.game_state.last_surface_pos.clone();
+                player.pos = player.pos.clone();
                 player.pos.z = 0.0;
                 player.is_diving = false;
-                gm.render_system.clear_dive_offset();
+                gm.render_system.set_camera_target(player.pos);
                 // Camera anchoring handled inside RenderSystem
             }
         }
@@ -74,9 +68,5 @@ pub fn update(gm: &mut GameManager) {
     if gm.frame_count < 10 {
         gm.render_system.update_camera(1.0);
     }
-
-    // Entity rendering is centralized via GameManager
-
-    // Rendering is centralized in GameManager.update()
 }
 

@@ -24,8 +24,6 @@ pub struct GameState {
     pub raft_entity_id: Option<u32>,
     pub ui_mode: UiMode,
     pub game_mode: GameMode,
-    // Store top-down state to restore after surfacing
-    pub last_surface_pos: V3,
 }
 
 /// UI modes
@@ -161,14 +159,14 @@ impl GameManager {
         // Sync structs to entities
         if let Some(id) = self.game_state.player_entity_id {
             if let (Some(player), Some(entity)) = (self.game_state.player.as_ref(), self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id)) {
-                entity.set_position(player.pos.clone());
+                entity.set_world_position(player.pos.clone());
                 entity.set_velocity(player.vel.clone());
             }
         }
         if let Some(id) = self.game_state.raft_entity_id {
             if let Some(raft) = self.game_state.raft.as_ref() {
                 if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
-                    entity.set_position(raft.center.clone());
+                    entity.set_world_position(raft.center.clone());
                 }
             }
         }
@@ -192,7 +190,7 @@ impl GameManager {
             // Floating items drift with water current + wind bias; despawn far away
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::FloatingItem) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
-                    let pos = e.get_position();
+                    let pos = e.get_world_position();
                     let cur = self.physics_system.get_water_current_at(&pos);
                     let wind = self.physics_system.get_wind();
                     let v = cur.add(wind.scale(0.8)); // floats push faster than raft
@@ -202,7 +200,7 @@ impl GameManager {
             // Fish drift with currents/wind
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Fish) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
-                    let pos = e.get_position();
+                    let pos = e.get_world_position();
                     let cur = self.physics_system.get_water_current_at(&pos);
                     let wind = self.physics_system.get_wind();
                     e.set_velocity(cur.add(wind.scale(0.2)));
@@ -212,7 +210,7 @@ impl GameManager {
             if self.game_state.game_mode == GameMode::Raft {
                 if let Some(raft_id) = self.game_state.raft_entity_id {
                     if let Some(raft_entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, raft_id) {
-                        let cur = self.physics_system.get_water_current_at(&raft_entity.get_position());
+                        let cur = self.physics_system.get_water_current_at(&raft_entity.get_world_position());
                         raft_entity.set_velocity(cur.scale(0.3));
                     }
                 }
@@ -222,7 +220,7 @@ impl GameManager {
             let raft_pos_opt = self.game_state.raft.as_ref().map(|r| r.center.clone());
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::FloatingItem) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
-                    let pos = e.get_position();
+                    let pos = e.get_world_position();
                     let mut too_far = pos.distance_to(&player.pos) > 800.0;
                     if let Some(raft_pos) = &raft_pos_opt {
                         if pos.distance_to(raft_pos) > 800.0 {
@@ -406,7 +404,7 @@ impl GameManager {
             points.push(crate::components::renderer::ui_renderer::MinimapPoint { x: center.0, y: center.1, size: 3.0, color: crate::constants::PLAYER_ON_RAFT_COLOR });
             for entity in self.entity_manager.get_all_entities(&self.entity_storage) {
                 let ety = crate::components::entities::game_entity::Entity::get_entity_type(entity);
-                let pos = crate::components::entities::game_entity::Entity::get_position(entity);
+                let pos = crate::components::entities::game_entity::Entity::get_world_position(entity);
                 let dx = (pos.x - player.pos.x) * scale;
                 let dy = (pos.y - player.pos.y) * scale;
                 let x = (center.0 + dx).clamp(4.0, 76.0);

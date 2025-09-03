@@ -12,9 +12,7 @@ pub struct RenderSystem {
     background_layers: Vec<BackgroundLayer>,
     view_mode: RenderViewMode,
     transition_alpha: f32,
-    last_player_pos: Option<Vec3>,
-    dive_offset: Option<Vec3>,
-    tide_phase: f32,
+    last_player_world_pos: Option<Vec3>,
 }
 
 impl RenderSystem {
@@ -25,9 +23,7 @@ impl RenderSystem {
             background_layers: Vec::new(),
             view_mode: RenderViewMode::TopDown,
             transition_alpha: 0.0,
-            last_player_pos: None,
-            dive_offset: None,
-            tide_phase: 0.0,
+            last_player_world_pos: None,
         }
     }
     
@@ -47,8 +43,6 @@ impl RenderSystem {
         if self.transition_alpha > 0.0 {
             self.transition_alpha = (self.transition_alpha - delta_time * 2.0).max(0.0);
         }
-        // Advance tide animation phase for top-down wave markers
-        self.tide_phase = (self.tide_phase + delta_time * 0.2) % (std::f32::consts::TAU);
     }
     
     /// Add entity to render queue
@@ -56,9 +50,9 @@ impl RenderSystem {
         let mut render_data = entity.get_render_data();
         // Project world position into current view
         let world_pos = entity.get_world_position();
-        render_data.position = match self.view_mode {
-            RenderViewMode::TopDown => Vec3::new(world_pos.x, world_pos.y, 0.0),
-            RenderViewMode::SideScroll => Vec3::new(world_pos.x, -world_pos.z, 0.0),
+        render_data.screen_position = match self.view_mode {
+            RenderViewMode::TopDown => Some((world_pos.x, world_pos.y)),
+            RenderViewMode::SideScroll => Some((world_pos.x, -world_pos.z)),
         };
         if render_data.visible {
             let command = RenderCommand::Entity {
@@ -76,19 +70,21 @@ impl RenderSystem {
     
     /// Render everything
     pub fn render(&mut self) {
-        let camera_pos = Vec3::new(self.camera_pos.0, self.camera_pos.1, 0.0);
+        let camera_pos = (self.camera_pos.0, self.camera_pos.1);
         let (screen_w, screen_h) = resolution();
         
         // Cache player world position (if present) for distance-based effects
-        self.last_player_pos = None;
+        self.last_player_world_pos = None;
         for command in &self.render_queue {
             if let RenderCommand::Entity { data, entity_type } = command {
                 if let EntityType::Player = entity_type {
-                    self.last_player_pos = Some(data.position.clone());
+                    self.last_player_world_pos = Some(data.world_position.clone());
                     break;
                 }
             }
         }
+
+        log!("Last player pos: {:?}", self.last_player_world_pos);
         
         // Clear screen
         self.clear_screen();
@@ -125,13 +121,10 @@ impl RenderSystem {
         });
         
         // Render background layers
-        self.render_background_layers(&camera_pos, screen_w, screen_h);
+        self.render_background_layers(camera_pos, screen_w, screen_h);
         
         // Render entities
-        self.render_entities(&camera_pos, screen_w, screen_h);
-        
-        // Render UI
-        self.render_ui(screen_w, screen_h);
+        self.render_entities(camera_pos, screen_w, screen_h);
         
         // Fade overlay
         if self.transition_alpha > 0.0 {
@@ -148,13 +141,6 @@ impl RenderSystem {
         self.view_mode = mode;
     }
 
-    pub fn set_dive_offset(&mut self, offset: Vec3) {
-        self.dive_offset = Some(offset);
-    }
-    pub fn clear_dive_offset(&mut self) {
-        self.dive_offset = None;
-    }
-
     pub fn trigger_transition_fade(&mut self) {
         self.transition_alpha = 1.0;
     }
@@ -166,11 +152,10 @@ impl RenderSystem {
     }
     
     /// Render background layers
-    fn render_background_layers(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
+    fn render_background_layers(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
         // In TopDown mode, draw a full-screen ocean background
         if let RenderViewMode::TopDown = self.view_mode {
             self.render_ocean_fullscreen(screen_w, screen_h);
-            self.render_topdown_tide_overlay(camera_pos, screen_w, screen_h);
             return;
         }
         // SideScroll and others: layered backgrounds
@@ -185,14 +170,14 @@ impl RenderSystem {
     }
     
     /// Render sky gradient
-    fn render_sky_gradient(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
+    fn render_sky_gradient(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
         for y in 0..screen_h {
             let screen_y = y as f32;
-            let world_y = camera_pos.y + (screen_y - screen_h as f32 * 0.5);
+            let world_y = camera_pos.1 + (screen_y - screen_h as f32 * 0.5);
             
             if world_y < 0.0 {
                 // Above sea level - sky that gets darker when viewed from depth
-                let view_depth_factor = (camera_pos.y / 200.0).clamp(0.0, 0.8);
+                let view_depth_factor = (camera_pos.1 / 200.0).clamp(0.0, 0.8);
                 let sky_brightness = 1.0 - view_depth_factor;
                 let sky_r = (0x87 as f32 * sky_brightness) as u32;
                 let sky_g = (0xCE as f32 * sky_brightness) as u32;
@@ -212,10 +197,10 @@ impl RenderSystem {
     }
     
     /// Render ocean gradient
-    fn render_ocean_gradient(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
+    fn render_ocean_gradient(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
         for y in 0..screen_h {
             let screen_y = y as f32;
-            let world_y = camera_pos.y + (screen_y - screen_h as f32 * 0.5);
+            let world_y = camera_pos.1 + (screen_y - screen_h as f32 * 0.5);
             
             if world_y >= 0.0 {
                 // Below sea level - underwater that gets darker with depth
@@ -239,12 +224,12 @@ impl RenderSystem {
     }
     
     /// Render water surface
-    fn render_water_surface(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
-        let water_surface_screen_y = -camera_pos.y + screen_h as f32 * 0.5;
+    fn render_water_surface(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
+        let water_surface_screen_y = -camera_pos.1 + screen_h as f32 * 0.5;
         
         if water_surface_screen_y >= -10.0 && water_surface_screen_y <= screen_h as f32 + 10.0 {
             for x in 0..screen_w as i32 {
-                let world_x = (x as f32 - screen_w as f32 * 0.5) + camera_pos.x;
+                let world_x = (x as f32 - screen_w as f32 * 0.5) + camera_pos.0;
                 let wave = (world_x * 0.02).sin() * 3.0;
                 let surface_y = water_surface_screen_y + wave;
                 
@@ -280,7 +265,7 @@ impl RenderSystem {
     }
     
     /// Render entities
-    fn render_entities(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
+    fn render_entities(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
         for command in &self.render_queue {
             if let RenderCommand::Entity { data, entity_type } = command {
                 self.render_entity(data, entity_type, camera_pos, screen_w, screen_h);
@@ -289,39 +274,41 @@ impl RenderSystem {
     }
     
     /// Render a single entity
-    fn render_entity(&self, data: &RenderData, entity_type: &EntityType, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
-        let screen_x = data.position.x - camera_pos.x + screen_w as f32 * 0.5;
-        let screen_y = data.position.y - camera_pos.y + screen_h as f32 * 0.5;
+    fn render_entity(&self, data: &RenderData, entity_type: &EntityType, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
+        if let Some(screen_position) = data.screen_position {
+            let screen_x = screen_position.0 - camera_pos.0 + screen_w as f32 * 0.5;
+            let screen_y = screen_position.1 - camera_pos.1 + screen_h as f32 * 0.5;
         
-        // Check if entity is on screen
-        if screen_x > -data.size && screen_x < screen_w as f32 + data.size &&
-           screen_y > -data.size && screen_y < screen_h as f32 + data.size {
-            
-            match entity_type {
-                EntityType::Player => {
-                    self.render_player(screen_x, screen_y, data);
-                },
-                EntityType::Raft => {
-                    self.render_raft(screen_x, screen_y, data);
-                },
-                EntityType::Fish => {
-                    self.render_fish(screen_x, screen_y, data);
-                },
-                EntityType::Monster => {
-                    self.render_monster(screen_x, screen_y, data);
-                },
-                EntityType::Shark => {
-                    self.render_shark(screen_x, screen_y, data);
-                },
-                EntityType::FloatingItem => {
-                    self.render_floating_item(screen_x, screen_y, data);
-                },
-                EntityType::Particle => {
-                    self.render_particle(screen_x, screen_y, data);
-                },
-                _ => {
-                    // Default rendering for other entity types
-                    circ!(d = data.size, position = (screen_x, screen_y), color = data.color, fixed = true);
+
+            // Check if entity is on screen
+            if screen_x > -data.size && screen_x < screen_w as f32 + data.size &&
+            screen_y > -data.size && screen_y < screen_h as f32 + data.size {
+                match entity_type {
+                    EntityType::Player => {
+                        self.render_player(screen_x, screen_y, data);
+                    },
+                    EntityType::Raft => {
+                        self.render_raft(screen_x, screen_y, data);
+                    },
+                    EntityType::Fish => {
+                        self.render_fish(screen_x, screen_y, data);
+                    },
+                    EntityType::Monster => {
+                        self.render_monster(screen_x, screen_y, data);
+                    },
+                    EntityType::Shark => {
+                        self.render_shark(screen_x, screen_y, data);
+                    },
+                    EntityType::FloatingItem => {
+                        self.render_floating_item(screen_x, screen_y, data);
+                    },
+                    EntityType::Particle => {
+                        self.render_particle(screen_x, screen_y, data);
+                    },
+                    _ => {
+                        // Default rendering for other entity types
+                        circ!(d = data.size, position = (screen_x, screen_y), color = data.color, fixed = true);
+                    }
                 }
             }
         }
@@ -425,13 +412,10 @@ impl RenderSystem {
         let raft_size = match self.view_mode {
             RenderViewMode::TopDown => data.size,
             RenderViewMode::SideScroll => {
-                // Prefer raft-vs-surface offset captured at dive start
-                if let Some(offset) = &self.dive_offset {
-                    let dy_topdown = offset.y.abs();
+                if let Some(player_pos) = &self.last_player_world_pos {
+                    let dy_topdown = (player_pos.y - data.world_position.y).abs();
                     // Use live side-scroll horizontal separation for perspective
-                    let dx_world = if let Some(player_pos) = &self.last_player_pos {
-                        (data.position.x - player_pos.x).abs()
-                    } else { 0.0 };
+                    let dx_world = (data.world_position.x - player_pos.x).abs();
                     let max_v = 200.0; // vertical range before min scale
                     let max_h = 400.0; // horizontal range, weaker effect
                     let tv = (dy_topdown / max_v).clamp(0.0, 1.0);
@@ -439,18 +423,6 @@ impl RenderSystem {
                     let min_scale = 0.5;
                     let base = 1.0 - tv * (1.0 - min_scale);
                     let scale = base * (1.0 - 0.15 * th);
-                    data.size * scale
-                } else if let Some(player_pos) = &self.last_player_pos {
-                    // Fallback to world distance if no offset available
-                    let dx = data.position.x - player_pos.x;
-                    let dy = data.position.y - player_pos.y;
-                    let distance = (dx * dx + dy * dy).sqrt();
-                    let max_distance = 600.0;
-                    let t = (distance / max_distance).clamp(0.0, 1.0);
-                    let min_scale = 0.5;
-                    let mut scale = 1.0 - t * (1.0 - min_scale);
-                    let hx = (dx.abs() / max_distance).clamp(0.0, 1.0);
-                    scale *= 1.0 - 0.15 * hx;
                     data.size * scale
                 } else {
                     data.size * 0.6
@@ -506,49 +478,6 @@ impl RenderSystem {
             let color = (r << 24) | (g << 16) | (b << 8) | 0xFF;
             rect!(x = 0.0, y = y as f32, w = screen_w as f32, h = 1.0, color = color, fixed = true);
         }
-    }
-
-    /// Subtle animated tide overlay as horizontal sine waves (~~~) in top-down view
-    /// World-anchored so it does not move with the camera
-    fn render_topdown_tide_overlay(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
-        let rows = 5;                   // number of wave bands
-        let spacing = (screen_h as f32 / (rows as f32 + 1.0)).max(24.0);
-        let amp = 3.0;                  // wave amplitude
-        let k = 0.015;                  // spatial frequency
-        let phase = self.tide_phase;    // animated phase
-        let step_x = 6.0;               // sampling step along the wave (world units)
-        let color_main = 0x66FFFFFF;    // subtle white
-        let color_foam = 0x33FFFFFF;    // even subtler highlight
-
-        // Compute current camera window in world space
-        let world_left = camera_pos.x - screen_w as f32 * 0.5;
-        let world_right = camera_pos.x + screen_w as f32 * 0.5;
-        let world_top = camera_pos.y - screen_h as f32 * 0.5;
-
-        for i in 0..rows {
-            // Distribute rows across the current visible window
-            let row_world_y = world_top + spacing * (i as f32 + 1.0);
-            // Slight per-row phase offset for parallax
-            let row_phase = phase + i as f32 * 0.6;
-
-            let mut xw = world_left;
-            while xw < world_right {
-                let yw = row_world_y + (xw * k + row_phase).sin() * amp;
-                // Convert world -> screen; draw as world-space (fixed = false)
-                let xs = xw - camera_pos.x + screen_w as f32 * 0.5;
-                let ys = yw - camera_pos.y + screen_h as f32 * 0.5;
-                // Draw small dashes along the sine curve to imply ~~~
-                rect!(x = xs, y = ys, w = 3.0, h = 1.0, color = color_main, fixed = false);
-                // Foam/glint slightly above the crest
-                rect!(x = xs + 1.0, y = ys - 1.0, w = 1.0, h = 1.0, color = color_foam, fixed = false);
-                xw += step_x;
-            }
-        }
-    }
-    
-    /// Render UI
-    fn render_ui(&self, _screen_w: u32, _screen_h: u32) {
-        // UI rendering will be handled by UIRenderer
     }
 }
 
