@@ -1,4 +1,4 @@
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::models::terrain::TerrainChunk;
 use crate::constants::*;
 use std::collections::HashMap;
@@ -23,13 +23,13 @@ impl WorldSystem {
     }
     
     /// Update world around player position
-    pub fn update(&mut self, player_pos: &V2) {
+    pub fn update(&mut self, player_pos: &V3) {
         self.generate_chunks_around_player(player_pos);
         self.cleanup_distant_chunks(player_pos);
     }
     
     /// Generate chunks around player position
-    fn generate_chunks_around_player(&mut self, player_pos: &V2) {
+    fn generate_chunks_around_player(&mut self, player_pos: &V3) {
         let chunk_x = (player_pos.x / (self.chunk_size as f32 * PIXEL_SIZE)).floor() as i32;
         let chunk_y = (player_pos.y / (self.chunk_size as f32 * PIXEL_SIZE)).floor() as i32;
         
@@ -121,7 +121,7 @@ impl WorldSystem {
     }
     
     /// Clean up chunks that are too far from player
-    fn cleanup_distant_chunks(&mut self, player_pos: &V2) {
+    fn cleanup_distant_chunks(&mut self, player_pos: &V3) {
         let max_distance = (self.render_distance + 2) as f32 * self.chunk_size as f32 * PIXEL_SIZE;
         let player_chunk_x = (player_pos.x / (self.chunk_size as f32 * PIXEL_SIZE)).floor() as i32;
         let player_chunk_y = (player_pos.y / (self.chunk_size as f32 * PIXEL_SIZE)).floor() as i32;

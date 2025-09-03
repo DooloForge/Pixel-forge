@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::components::entities::game_entity::{Entity, EntityType};
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 
 
 /// Manages all game entities and their lifecycle
@@ -145,7 +145,7 @@ impl EntityManager {
     }
     
     /// Get entities in a specific area
-    pub fn get_entities_in_area<'a>(&self, storage: &'a EntityStorage, center: &V2, radius: f32) -> Vec<&'a Entity> {
+    pub fn get_entities_in_area<'a>(&self, storage: &'a EntityStorage, center: &V3, radius: f32) -> Vec<&'a Entity> {
         let entity_ids = self.spatial_hash.query_area(center, radius);
         
         entity_ids.iter()
@@ -154,7 +154,7 @@ impl EntityManager {
     }
     
     /// Get entities near a position
-    pub fn get_entities_near<'a>(&self, storage: &'a EntityStorage, position: &V2, max_distance: f32) -> Vec<&'a Entity> {
+    pub fn get_entities_near<'a>(&self, storage: &'a EntityStorage, position: &V3, max_distance: f32) -> Vec<&'a Entity> {
         self.get_entities_in_area(storage, position, max_distance)
     }
     
@@ -176,7 +176,7 @@ impl EntityManager {
     }
     
     /// Update spatial hash for an entity
-    pub fn update_entity_position(&mut self, storage: &EntityStorage, entity_id: u32, new_position: V2) {
+    pub fn update_entity_position(&mut self, storage: &EntityStorage, entity_id: u32, new_position: V3) {
         if let Some(entity) = storage.entities.get(&entity_id) {
             self.spatial_hash.update(entity_id, entity.get_position(), new_position);
         }
@@ -187,7 +187,7 @@ impl EntityManager {
 struct SpatialHash {
     grid_size: f32,
     grid: HashMap<(i32, i32), Vec<u32>>,
-    entity_positions: HashMap<u32, V2>,
+    entity_positions: HashMap<u32, V3>,
 }
 
 impl SpatialHash {
@@ -200,7 +200,7 @@ impl SpatialHash {
     }
     
     /// Insert entity into spatial hash
-    pub fn insert(&mut self, entity_id: u32, position: V2) {
+    pub fn insert(&mut self, entity_id: u32, position: V3) {
         let grid_pos = self.world_to_grid(&position);
         self.grid.entry(grid_pos).or_insert_with(Vec::new).push(entity_id);
         self.entity_positions.insert(entity_id, position);
@@ -218,7 +218,7 @@ impl SpatialHash {
     }
     
     /// Update entity position in spatial hash
-    pub fn update(&mut self, entity_id: u32, old_position: V2, new_position: V2) {
+    pub fn update(&mut self, entity_id: u32, old_position: V3, new_position: V3) {
         let old_grid_pos = self.world_to_grid(&old_position);
         let new_grid_pos = self.world_to_grid(&new_position);
         
@@ -235,7 +235,7 @@ impl SpatialHash {
     }
     
     /// Query entities in an area
-    pub fn query_area(&self, center: &V2, radius: f32) -> Vec<u32> {
+    pub fn query_area(&self, center: &V3, radius: f32) -> Vec<u32> {
         let mut result = Vec::new();
         let center_grid = self.world_to_grid(center);
         let grid_radius = (radius / self.grid_size).ceil() as i32;
@@ -266,7 +266,7 @@ impl SpatialHash {
     }
     
     /// Convert world position to grid position
-    fn world_to_grid(&self, position: &V2) -> (i32, i32) {
+    fn world_to_grid(&self, position: &V3) -> (i32, i32) {
         (
             (position.x / self.grid_size).floor() as i32,
             (position.y / self.grid_size).floor() as i32,

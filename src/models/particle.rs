@@ -1,16 +1,16 @@
-use crate::math::Vec2;
+use crate::math::Vec3;
 // use crate::constants::PARTICLE_LIFETIME_TICKS;
 use crate::constants::GRAVITY;
 
 #[turbo::serialize]
 pub struct Particle {
-    pub pos: Vec2,
-    pub vel: Vec2,
+    pub pos: Vec3,
+    pub vel: Vec3,
     pub life: u32,
 }
 
 impl Particle {
-    pub fn new(pos: Vec2, vel: Vec2) -> Self {
+    pub fn new(pos: Vec3, vel: Vec3) -> Self {
         Self { pos, vel, life: 30 }
     }
     pub fn update(&mut self) -> bool {

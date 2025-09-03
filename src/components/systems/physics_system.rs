@@ -1,20 +1,20 @@
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::models::physics_body::PhysicsBody;
 use crate::constants::*;
 
 /// Handles all physics calculations and updates
 #[turbo::serialize]
 pub struct PhysicsSystem {
-    gravity: V2,
-    wind: V2,
+    gravity: V3,
+    wind: V3,
     water_currents: Vec<WaterCurrent>,
 }
 
 impl PhysicsSystem {
     pub fn new() -> Self {
         Self {
-            gravity: V2::new(0.0, GRAVITY),
-            wind: V2::zero(),
+            gravity: V3::new(0.0, GRAVITY, 0.0),
+            wind: V3::zero(),
             water_currents: Vec::new(),
         }
     }
@@ -37,9 +37,10 @@ impl PhysicsSystem {
         
         // Add water resistance if underwater
         if body.position.y > 0.0 {
-            let water_resistance = V2::new(
+            let water_resistance = V3::new(
                 -body.velocity.x * 0.1,
-                -body.velocity.y * 0.05
+                -body.velocity.y * 0.05,
+                0.0
             );
             total_force = total_force.add(water_resistance);
         }
@@ -60,36 +61,36 @@ impl PhysicsSystem {
         // Ground collision
         if body.position.y > 800.0 {
             let pos = body.position;
-            body.position = V2::new(pos.x, 800.0);
+            body.position = V3::new(pos.x, 800.0, pos.z);
             
             // Bounce with damping
             let vel = body.velocity;
-            body.velocity = V2::new(vel.x * FRICTION, -vel.y * BOUNCE_DAMPING);
+            body.velocity = V3::new(vel.x * FRICTION, -vel.y * BOUNCE_DAMPING, vel.z);
         }
         
         // Water surface collision (Y = 0)
         if body.position.y < 0.0 {
             let pos = body.position;
-            body.position = V2::new(pos.x, 0.0);
+            body.position = V3::new(pos.x, 0.0, pos.z);
             
             // Water splash effect
             let vel = body.velocity;
-            body.velocity = V2::new(vel.x * 0.8, vel.y * 0.3);
+            body.velocity = V3::new(vel.x * 0.8, vel.y * 0.3, vel.z);
         }
     }
     
     /// Set wind direction and strength
-    pub fn set_wind(&mut self, direction: V2, strength: f32) {
+    pub fn set_wind(&mut self, direction: V3, strength: f32) {
         self.wind = direction.normalize().scale(strength);
     }
     
     /// Get current wind vector
-    pub fn get_wind(&self) -> V2 {
+    pub fn get_wind(&self) -> V3 {
         self.wind.clone()
     }
     
     /// Add water current
-    pub fn add_water_current(&mut self, position: V2, direction: V2, strength: f32) {
+    pub fn add_water_current(&mut self, position: V3, direction: V3, strength: f32) {
         self.water_currents.push(WaterCurrent {
             position,
             direction: direction.normalize(),
@@ -99,8 +100,8 @@ impl PhysicsSystem {
     }
     
     /// Get water current at specific position
-    pub fn get_water_current_at(&self, position: &V2) -> V2 {
-        let mut total_current = V2::zero();
+    pub fn get_water_current_at(&self, position: &V3) -> V3 {
+        let mut total_current = V3::zero();
         
         for current in &self.water_currents {
             let distance = position.distance_to(&current.position);
@@ -118,8 +119,8 @@ impl PhysicsSystem {
 /// Represents a water current that affects physics
 #[turbo::serialize]
 struct WaterCurrent {
-    position: V2,
-    direction: V2,
+    position: V3,
+    direction: V3,
     strength: f32,
     radius: f32,
 }

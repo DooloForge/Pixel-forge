@@ -27,25 +27,27 @@ pub fn update(gm: &mut GameManager) {
             new_mode = super::super::game_manager::GameMode::Dive;
             gm.game_state.last_surface_pos = player.pos.clone();
             if let Some(raft_ref) = &gm.game_state.raft {
-                let offset = V2::new(player.pos.x - raft_ref.center.x, player.pos.y - raft_ref.center.y);
+                let offset = crate::math::Vec3::new(player.pos.x - raft_ref.center.x, player.pos.y - raft_ref.center.y, 0.0);
                 gm.render_system.set_dive_offset(offset);
             }
-            player.pos.y = 10.0;
+            // Start diving by moving into depth (z axis), keep top-down y at surface
+            player.pos.z = -10.0;
             player.depth = -10;
             player.is_diving = true;
+            // Camera anchoring handled inside RenderSystem based on world z
         }
 
         if new_mode == super::super::game_manager::GameMode::Dive {
-            let depth_from_position = (-(player.pos.y as i32))
-                .max(crate::constants::ABYSS_DEPTH)
-                .min(crate::constants::SURFACE_DEPTH);
-            player.depth = depth_from_position;
-            player.is_diving = player.depth < crate::constants::SURFACE_DEPTH;
-            if player.depth >= crate::constants::SURFACE_DEPTH {
+            // Depth is derived from world z (negative below surface)
+            player.depth = (-player.pos.z).max(0.0) as i32;
+            player.is_diving = player.pos.z < 0.0;
+            if player.pos.z >= 0.0 {
                 new_mode = super::super::game_manager::GameMode::Raft;
                 player.pos = gm.game_state.last_surface_pos.clone();
+                player.pos.z = 0.0;
                 player.is_diving = false;
                 gm.render_system.clear_dive_offset();
+                // Camera anchoring handled inside RenderSystem
             }
         }
         if new_mode != gm.game_state.game_mode {

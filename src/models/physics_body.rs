@@ -1,11 +1,11 @@
-use crate::math::Vec2;
+use crate::math::Vec3;
 use crate::constants::{GRAVITY, FRICTION, BOUNCE_DAMPING};
 use turbo::*;
 
 #[turbo::serialize]
 pub struct PhysicsBody {
-    pub position: Vec2,
-    pub velocity: Vec2,
+    pub position: Vec3,
+    pub velocity: Vec3,
     pub mass: f32,
     pub radius: f32,
     pub destroyed: bool,
@@ -16,8 +16,8 @@ pub struct PhysicsBody {
 impl PhysicsBody {
     pub fn new(x: f32, y: f32) -> Self {
         Self {
-            position: Vec2::new(x, y),
-            velocity: Vec2::zero(),
+            position: Vec3::new(x, y, 0.0),
+            velocity: Vec3::zero(),
             mass: 1.0,
             radius: 6.0,
             destroyed: false,

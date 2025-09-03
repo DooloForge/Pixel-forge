@@ -1,4 +1,4 @@
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::components::systems::*;
 use crate::components::renderer::*;
 use crate::components::input::*;
@@ -25,7 +25,7 @@ pub struct GameState {
     pub ui_mode: UiMode,
     pub game_mode: GameMode,
     // Store top-down state to restore after surfacing
-    pub last_surface_pos: V2,
+    pub last_surface_pos: V3,
 }
 
 /// UI modes
@@ -134,9 +134,12 @@ impl GameManager {
         self.spawn_system.set_spawn_rate(SpawnType::Bubble, 60);
         
         // Set up physics system
-        self.physics_system.set_wind(V2::new(1.0, 0.0), 0.5);
+        self.physics_system.set_wind(V3::new(1.0, 0.0, 0.0), 0.5);
         // Add a broad, slow surface current so floats drift in raft mode
-        self.physics_system.add_water_current(V2::new(0.0, 0.0), V2::new(1.0, 0.0), 0.6);
+        self.physics_system.add_water_current(V3::new(0.0, 0.0, 0.0), V3::new(1.0, 0.0, 0.0), 0.6);
+        // Mirror wind into spawner for directional edge spawns
+        let wind = self.physics_system.get_wind();
+        self.spawn_system.set_wind(wind);
     }
     
     /// Main update loop
@@ -169,6 +172,21 @@ impl GameManager {
                 }
             }
         }
+        // Move raft world position with sea and optionally autopilot, and carry player if on raft
+        let (player_on_raft, player_diving) = if let Some(p) = &self.game_state.player { (p.on_raft, p.is_diving) } else { (false, false) };
+        if let Some(raft) = &mut self.game_state.raft {
+            let cur = self.physics_system.get_water_current_at(&raft.center);
+            let wind = self.physics_system.get_wind();
+            // Slow tide-driven drift
+            let drift = cur.scale(0.6).add(wind.scale(0.2));
+            let delta = drift.scale(self.delta_time);
+            raft.center = raft.center.add(delta);
+            if player_on_raft {
+                if let Some(p) = self.game_state.player.as_mut() {
+                    p.pos = p.pos.add(delta);
+                }
+            }
+        }
         // Apply simple environment to entities (water current drift for floats; gentle swim for fish)
         if let Some(player) = &self.game_state.player {
             // Floating items drift with water current + wind bias; despawn far away
@@ -181,15 +199,13 @@ impl GameManager {
                     e.set_velocity(v);
                 }
             }
-            // Fish light wandering using current as baseline
+            // Fish drift with currents/wind
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Fish) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
                     let pos = e.get_position();
-                    let mut v = self.physics_system.get_water_current_at(&pos);
-                    // Nudge towards a slow circular swim around player
-                    let dir = V2::new(player.pos.x - pos.x, player.pos.y - pos.y).normalize();
-                    v = v.add(dir.scale(0.2));
-                    e.set_velocity(v);
+                    let cur = self.physics_system.get_water_current_at(&pos);
+                    let wind = self.physics_system.get_wind();
+                    e.set_velocity(cur.add(wind.scale(0.2)));
                 }
             }
             // Raft drifts slowly with surface current in Raft mode
@@ -269,13 +285,13 @@ impl GameManager {
     fn initialize_playing_scene(&mut self) {
         // Create player if not exists
         if self.game_state.player.is_none() {
-            let player = Player::new(V2::new(0.0, 0.0));
+            let player = Player::new(V3::new(0.0, 0.0, 0.0));
             self.game_state.player = Some(player);
         }
         
         // Create raft if not exists
         if self.game_state.raft.is_none() {
-            let raft = Raft::new(V2::new(0.0, 0.0));
+            let raft = Raft::new(V3::new(0.0, 0.0, 0.0));
             self.game_state.raft = Some(raft);
         }
         
@@ -314,7 +330,7 @@ impl GameManager {
     }
     
     /// Update spawning (internal version that takes extracted values)
-    pub(crate) fn update_spawning_internal(&mut self, player_pos: &V2) {
+    pub(crate) fn update_spawning_internal(&mut self, player_pos: &V3) {
         // Get current entity counts from entity manager
         let mut current_counts = std::collections::HashMap::new();
         let floats = self.entity_manager.get_entity_count(crate::components::entities::game_entity::EntityType::FloatingItem);
@@ -324,6 +340,8 @@ impl GameManager {
         current_counts.insert(SpawnType::Bubble, 0);
         
         // Update spawn system
+        // Keep wind in sync
+        self.spawn_system.set_wind(self.physics_system.get_wind());
         self.spawn_system.update(player_pos, &current_counts);
         // Consume pending spawns and create entities
         for (stype, pos) in self.spawn_system.drain_pending() {
@@ -366,14 +384,16 @@ impl GameManager {
                 crate::models::player::Tool::Hammer => "Hammer",
             }.to_string();
             let status = if player.is_diving { "Diving" } else if player.on_raft { "On Raft" } else { "Swimming" }.to_string();
+            let player_pos_str = Some(format!("Player: ({:.1}, {:.1}, {:.1})", player.pos.x, player.pos.y, player.pos.z));
+            let raft_pos_str = self.game_state.raft.as_ref().map(|r| format!("Raft: ({:.1}, {:.1}, {:.1})", r.center.x, r.center.y, r.center.z));
             ui_renderer.set_hud_state(crate::components::renderer::ui_renderer::HudState {
                 tool: tool_name,
                 health: player.health,
                 hunger: player.hunger,
                 thirst: player.thirst,
                 status,
-                player_pos: None,
-                raft_pos: None,
+                player_pos: player_pos_str,
+                raft_pos: raft_pos_str,
             });
         }
 
@@ -410,23 +430,28 @@ impl GameManager {
 }
 
 /// Apply player input directly (no self borrowing)
-pub(crate) fn apply_player_input(player: &mut Player, input_state: &crate::components::input::input_system::InputState, movement: &V2) {
+pub(crate) fn apply_player_input(player: &mut Player, input_state: &crate::components::input::input_system::InputState, movement: &V3) {
     // Tool switching
     if input_state.switch_tool {
         player.switch_tool();
     }
     
-    // Movement: raft vs dive
+    // Movement: raft vs swim vs dive
     if player.on_raft {
         // Raft mode: slower on-raft movement; separate sailing inputs can be applied to raft
         let move_speed = 1.0;
         player.pos.x += movement.x * move_speed;
         player.pos.y += movement.y * move_speed;
-    } else {
-        // Top-down swim outside raft: no clamp
+    } else if player.is_diving {
+        // Dive mode: horizontal is x, vertical is depth (z). Do NOT change world y while diving
         let move_speed = 2.0;
-        player.pos.y += movement.y * move_speed;
         player.pos.x += movement.x * move_speed;
+        player.pos.z += movement.y * -move_speed; // up input (negative y) should reduce depth (towards 0)
+    } else {
+        // Top-down swim outside raft: move in x/y plane
+        let move_speed = 2.0;
+        player.pos.x += movement.x * move_speed;
+        player.pos.y += movement.y * move_speed;
     }
     
     // on_raft is determined by the caller (uses top-down position when in Dive)
@@ -441,9 +466,10 @@ pub(crate) fn apply_player_input(player: &mut Player, input_state: &crate::compo
 }
 
 /// Apply physics update directly (no self borrowing)
-pub(crate) fn apply_physics_update(player: &mut Player, water_current: &V2, delta_time: f32) {
+pub(crate) fn apply_physics_update(player: &mut Player, water_current: &V3, delta_time: f32) {
     if !player.on_raft {
-        player.vel = player.vel.add(water_current.scale(delta_time));
-        player.pos = player.pos.add(player.vel.clone());
+        // Swimmer is fixed against tide: no passive drift from water current
+        player.vel = V3::zero();
+        // Position changes only via input handling
     }
 }

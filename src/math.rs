@@ -66,7 +66,16 @@ impl Vec3 {
     pub fn add(&self, other: Vec3) -> Vec3 { Vec3::new(self.x + other.x, self.y + other.y, self.z + other.z) }
     pub fn sub(&self, other: Vec3) -> Vec3 { Vec3::new(self.x - other.x, self.y - other.y, self.z - other.z) }
     pub fn scale(&self, s: f32) -> Vec3 { Vec3::new(self.x * s, self.y * s, self.z * s) }
+    pub fn mul(&self, s: f32) -> Vec3 { self.scale(s) }
+    pub fn length(&self) -> f32 { (self.x * self.x + self.y * self.y + self.z * self.z).sqrt() }
+    pub fn distance_to(&self, other: &Vec3) -> f32 {
+        let dx = self.x - other.x;
+        let dy = self.y - other.y;
+        let dz = self.z - other.z;
+        (dx * dx + dy * dy + dz * dz).sqrt()
+    }
+    pub fn normalize(&self) -> Vec3 {
+        let len = self.length();
+        if len > 0.0 { self.scale(1.0 / len) } else { Vec3::zero() }
+    }
 }
-
-pub fn project_topdown(p: Vec3) -> Vec2 { Vec2::new(p.x, p.y) }
-pub fn project_dive(p: Vec3) -> Vec2 { Vec2::new(p.x, p.z) }

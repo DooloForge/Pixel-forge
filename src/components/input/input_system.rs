@@ -1,4 +1,5 @@
 use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::components::input::input_mapping::InputMapping;
 use turbo::{keyboard, mouse};
 
@@ -120,8 +121,8 @@ impl InputSystem {
     }
     
     /// Get movement vector from input
-    pub fn get_movement_vector(&self) -> V2 {
-        let mut movement = V2::zero();
+    pub fn get_movement_vector(&self) -> V3 {
+        let mut movement = V3::zero();
         
         if self.current_input_state.move_left {
             movement.x -= 1.0;

@@ -1,4 +1,3 @@
-use crate::math::Vec2 as V2;
 use crate::math::Vec3;
 
 #[derive(Copy, PartialEq, Eq, Ord, PartialOrd)]
@@ -15,7 +14,7 @@ pub enum RenderLayer {
 
 #[turbo::serialize]
 pub struct RenderData {
-    pub position: V2,
+    pub position: Vec3,
     pub size: f32,
     pub color: u32,
     pub visible: bool,
@@ -23,7 +22,7 @@ pub struct RenderData {
 }
 
 impl RenderData {
-    pub fn new(position: V2, size: f32, color: u32) -> Self {
+    pub fn new(position: Vec3, size: f32, color: u32) -> Self {
         Self { position, size, color, visible: true, layer: RenderLayer::Entity }
     }
     pub fn with_layer(mut self, layer: RenderLayer) -> Self {
@@ -75,7 +74,7 @@ impl Entity {
             Entity::Particle(_) => EntityType::Particle,
         }
     }
-    pub fn get_position(&self) -> V2 {
+    pub fn get_position(&self) -> Vec3 {
         match self {
             Entity::Player(e) => e.player.pos.clone(),
             Entity::Raft(e) => e.raft.center.clone(),
@@ -85,7 +84,7 @@ impl Entity {
             Entity::Particle(e) => e.position.clone(),
         }
     }
-    pub fn set_position(&mut self, pos: V2) {
+    pub fn set_position(&mut self, pos: Vec3) {
         match self {
             Entity::Player(e) => { e.player.pos = pos; }
             Entity::Raft(e) => { e.raft.center = pos; }
@@ -98,7 +97,8 @@ impl Entity {
 
     pub fn get_world_position(&self) -> Vec3 {
         match self {
-            Entity::Player(e) => Vec3::new(e.player.pos.x, e.player.pos.y, if e.player.is_diving { e.player.depth as f32 } else { 0.0 }),
+            // Use player's actual world z (depth), not derived depth value
+            Entity::Player(e) => Vec3::new(e.player.pos.x, e.player.pos.y, e.player.pos.z),
             Entity::Raft(e) => Vec3::new(e.raft.center.x, e.raft.center.y, 0.0),
             Entity::Fish(e) => Vec3::new(e.position.x, 0.0, e.position.y),
             Entity::Monster(e) => Vec3::new(e.position.x, 0.0, e.position.y),
@@ -107,17 +107,17 @@ impl Entity {
         }
     }
     
-    pub fn get_velocity(&self) -> V2 {
+    pub fn get_velocity(&self) -> Vec3 {
         match self {
             Entity::Player(e) => e.player.vel.clone(),
-            Entity::Raft(_e) => V2::zero(),
+            Entity::Raft(_e) => Vec3::zero(),
             Entity::Fish(e) => e.velocity.clone(),
             Entity::Monster(e) => e.velocity.clone(),
             Entity::FloatingItem(e) => e.velocity.clone(),
             Entity::Particle(e) => e.velocity.clone(),
         }
     }
-    pub fn set_velocity(&mut self, vel: V2) {
+    pub fn set_velocity(&mut self, vel: Vec3) {
         match self {
             Entity::Player(e) => { e.player.vel = vel; }
             Entity::Raft(_e) => {}
@@ -136,6 +136,10 @@ impl Entity {
                 e.lifetime += delta_time;
                 e.health.update(delta_time);
                 e.stats.regenerate_stamina(delta_time);
+                // Despawn after flowing a certain distance from origin
+                if e.position.distance_to(&e.spawn_origin) > 1200.0 {
+                    e.health.hp = 0.0; // mark for removal via is_alive/lifetime checks
+                }
             },
             Entity::Monster(e) => {
                 e.position = e.position.add(e.velocity.scale(delta_time));
@@ -145,6 +149,9 @@ impl Entity {
             Entity::FloatingItem(e) => {
                 e.position = e.position.add(e.velocity.scale(delta_time));
                 e.lifetime += delta_time;
+                if e.position.distance_to(&e.spawn_origin) > 1600.0 {
+                    e.lifetime = 10000.0; // exceed removal threshold
+                }
             },
             Entity::Particle(e) => {
                 e.position = e.position.add(e.velocity.scale(delta_time));

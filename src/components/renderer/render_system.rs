@@ -1,5 +1,5 @@
 use super::*;
-use crate::math::{Vec2 as V2, project_topdown, project_dive};
+use crate::math::Vec3;
 use crate::components::entities::game_entity::{Entity, EntityType, RenderData, RenderLayer};
 // CameraSystem removed; use turbo camera API directly
 // use crate::constants::*;
@@ -12,8 +12,9 @@ pub struct RenderSystem {
     background_layers: Vec<BackgroundLayer>,
     view_mode: RenderViewMode,
     transition_alpha: f32,
-    last_player_pos: Option<V2>,
-    dive_offset: Option<V2>,
+    last_player_pos: Option<Vec3>,
+    dive_offset: Option<Vec3>,
+    tide_phase: f32,
 }
 
 impl RenderSystem {
@@ -26,12 +27,17 @@ impl RenderSystem {
             transition_alpha: 0.0,
             last_player_pos: None,
             dive_offset: None,
+            tide_phase: 0.0,
         }
     }
     
-    /// Set camera target
-    pub fn set_camera_target(&mut self, target: V2) {
-        self.camera_pos = (target.x, target.y);
+    /// Set camera target from world position; compute screen-plane y based on view mode
+    pub fn set_camera_target(&mut self, world: Vec3) {
+        let cam_y = match self.view_mode {
+            RenderViewMode::TopDown => world.y,
+            RenderViewMode::SideScroll => -world.z,
+        };
+        self.camera_pos = (world.x, cam_y);
         camera::set_xy(self.camera_pos.0, self.camera_pos.1);
     }
     
@@ -41,16 +47,18 @@ impl RenderSystem {
         if self.transition_alpha > 0.0 {
             self.transition_alpha = (self.transition_alpha - delta_time * 2.0).max(0.0);
         }
+        // Advance tide animation phase for top-down wave markers
+        self.tide_phase = (self.tide_phase + delta_time * 0.2) % (std::f32::consts::TAU);
     }
     
     /// Add entity to render queue
     pub fn add_entity(&mut self, entity: &Entity) {
         let mut render_data = entity.get_render_data();
-        // Project world position into current view so we use a single world-space coordinate
+        // Project world position into current view
         let world_pos = entity.get_world_position();
         render_data.position = match self.view_mode {
-            RenderViewMode::TopDown => project_topdown(world_pos),
-            RenderViewMode::SideScroll => project_dive(world_pos),
+            RenderViewMode::TopDown => Vec3::new(world_pos.x, world_pos.y, 0.0),
+            RenderViewMode::SideScroll => Vec3::new(world_pos.x, -world_pos.z, 0.0),
         };
         if render_data.visible {
             let command = RenderCommand::Entity {
@@ -68,7 +76,7 @@ impl RenderSystem {
     
     /// Render everything
     pub fn render(&mut self) {
-        let camera_pos = V2::new(self.camera_pos.0, self.camera_pos.1);
+        let camera_pos = Vec3::new(self.camera_pos.0, self.camera_pos.1, 0.0);
         let (screen_w, screen_h) = resolution();
         
         // Cache player world position (if present) for distance-based effects
@@ -140,7 +148,7 @@ impl RenderSystem {
         self.view_mode = mode;
     }
 
-    pub fn set_dive_offset(&mut self, offset: V2) {
+    pub fn set_dive_offset(&mut self, offset: Vec3) {
         self.dive_offset = Some(offset);
     }
     pub fn clear_dive_offset(&mut self) {
@@ -158,10 +166,11 @@ impl RenderSystem {
     }
     
     /// Render background layers
-    fn render_background_layers(&self, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_background_layers(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         // In TopDown mode, draw a full-screen ocean background
         if let RenderViewMode::TopDown = self.view_mode {
             self.render_ocean_fullscreen(screen_w, screen_h);
+            self.render_topdown_tide_overlay(camera_pos, screen_w, screen_h);
             return;
         }
         // SideScroll and others: layered backgrounds
@@ -176,7 +185,7 @@ impl RenderSystem {
     }
     
     /// Render sky gradient
-    fn render_sky_gradient(&self, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_sky_gradient(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         for y in 0..screen_h {
             let screen_y = y as f32;
             let world_y = camera_pos.y + (screen_y - screen_h as f32 * 0.5);
@@ -203,7 +212,7 @@ impl RenderSystem {
     }
     
     /// Render ocean gradient
-    fn render_ocean_gradient(&self, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_ocean_gradient(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         for y in 0..screen_h {
             let screen_y = y as f32;
             let world_y = camera_pos.y + (screen_y - screen_h as f32 * 0.5);
@@ -230,7 +239,7 @@ impl RenderSystem {
     }
     
     /// Render water surface
-    fn render_water_surface(&self, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_water_surface(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         let water_surface_screen_y = -camera_pos.y + screen_h as f32 * 0.5;
         
         if water_surface_screen_y >= -10.0 && water_surface_screen_y <= screen_h as f32 + 10.0 {
@@ -271,7 +280,7 @@ impl RenderSystem {
     }
     
     /// Render entities
-    fn render_entities(&self, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_entities(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         for command in &self.render_queue {
             if let RenderCommand::Entity { data, entity_type } = command {
                 self.render_entity(data, entity_type, camera_pos, screen_w, screen_h);
@@ -280,7 +289,7 @@ impl RenderSystem {
     }
     
     /// Render a single entity
-    fn render_entity(&self, data: &RenderData, entity_type: &EntityType, camera_pos: &V2, screen_w: u32, screen_h: u32) {
+    fn render_entity(&self, data: &RenderData, entity_type: &EntityType, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
         let screen_x = data.position.x - camera_pos.x + screen_w as f32 * 0.5;
         let screen_y = data.position.y - camera_pos.y + screen_h as f32 * 0.5;
         
@@ -496,6 +505,44 @@ impl RenderSystem {
             let b = (0xE1 as f32 * (1.0 - 0.4 * t)) as u32;
             let color = (r << 24) | (g << 16) | (b << 8) | 0xFF;
             rect!(x = 0.0, y = y as f32, w = screen_w as f32, h = 1.0, color = color, fixed = true);
+        }
+    }
+
+    /// Subtle animated tide overlay as horizontal sine waves (~~~) in top-down view
+    /// World-anchored so it does not move with the camera
+    fn render_topdown_tide_overlay(&self, camera_pos: &Vec3, screen_w: u32, screen_h: u32) {
+        let rows = 5;                   // number of wave bands
+        let spacing = (screen_h as f32 / (rows as f32 + 1.0)).max(24.0);
+        let amp = 3.0;                  // wave amplitude
+        let k = 0.015;                  // spatial frequency
+        let phase = self.tide_phase;    // animated phase
+        let step_x = 6.0;               // sampling step along the wave (world units)
+        let color_main = 0x66FFFFFF;    // subtle white
+        let color_foam = 0x33FFFFFF;    // even subtler highlight
+
+        // Compute current camera window in world space
+        let world_left = camera_pos.x - screen_w as f32 * 0.5;
+        let world_right = camera_pos.x + screen_w as f32 * 0.5;
+        let world_top = camera_pos.y - screen_h as f32 * 0.5;
+
+        for i in 0..rows {
+            // Distribute rows across the current visible window
+            let row_world_y = world_top + spacing * (i as f32 + 1.0);
+            // Slight per-row phase offset for parallax
+            let row_phase = phase + i as f32 * 0.6;
+
+            let mut xw = world_left;
+            while xw < world_right {
+                let yw = row_world_y + (xw * k + row_phase).sin() * amp;
+                // Convert world -> screen; draw as world-space (fixed = false)
+                let xs = xw - camera_pos.x + screen_w as f32 * 0.5;
+                let ys = yw - camera_pos.y + screen_h as f32 * 0.5;
+                // Draw small dashes along the sine curve to imply ~~~
+                rect!(x = xs, y = ys, w = 3.0, h = 1.0, color = color_main, fixed = false);
+                // Foam/glint slightly above the crest
+                rect!(x = xs + 1.0, y = ys - 1.0, w = 1.0, h = 1.0, color = color_foam, fixed = false);
+                xw += step_x;
+            }
         }
     }
     

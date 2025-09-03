@@ -1,12 +1,12 @@
 use super::*;
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 
 
 /// Handles AI behavior for various game entities
 #[turbo::serialize]
 pub struct AISystem {
     behavior_trees: std::collections::HashMap<u32, BehaviorTree>,
-    pathfinding_cache: std::collections::HashMap<(i32, i32, i32, i32), Vec<V2>>,
+    pathfinding_cache: std::collections::HashMap<(i32, i32, i32, i32), Vec<V3>>,
 }
 
 impl AISystem {
@@ -18,7 +18,7 @@ impl AISystem {
     }
     
     /// Update AI for all entities
-    pub fn update(&mut self, entities: &mut [&mut dyn AIEntity], player_pos: &V2, delta_time: f32) {
+    pub fn update(&mut self, entities: &mut [&mut dyn AIEntity], player_pos: &V3, delta_time: f32) {
         for entity in entities {
             let entity_id = entity.get_id();
             
@@ -98,7 +98,7 @@ impl AISystem {
     }
     
     /// Execute AI action
-    fn execute_action(&self, entity: &mut dyn AIEntity, action: AIAction, player_pos: &V2, delta_time: f32) {
+    fn execute_action(&self, entity: &mut dyn AIEntity, action: AIAction, player_pos: &V3, delta_time: f32) {
         match action {
             AIAction::Flee => {
                 // Already handled in behavior tree
@@ -128,7 +128,7 @@ impl AISystem {
     }
     
     /// Find path between two points
-    pub fn find_path(&mut self, start: &V2, end: &V2) -> Vec<V2> {
+    pub fn find_path(&mut self, start: &V3, end: &V3) -> Vec<V3> {
         let start_x = (start.x / 32.0) as i32;
         let start_y = (start.y / 32.0) as i32;
         let end_x = (end.x / 32.0) as i32;
@@ -149,14 +149,15 @@ impl AISystem {
     }
     
     /// Simple pathfinding algorithm
-    fn simple_pathfinding(&self, start: &V2, end: &V2) -> Vec<V2> {
+    fn simple_pathfinding(&self, start: &V3, end: &V3) -> Vec<V3> {
         let mut path = Vec::new();
         let mut current = start.clone();
         
         while current.distance_to(end) > 10.0 {
-            let direction = V2::new(
+            let direction = V3::new(
                 end.x - current.x,
                 end.y - current.y,
+                end.z - current.z,
             ).normalize();
             
             current = current.add(direction.scale(10.0));
@@ -192,10 +193,10 @@ pub enum AIAction {
 pub trait AIEntity {
     fn get_id(&self) -> u32;
     fn get_entity_type(&self) -> EntityType;
-    fn get_position(&self) -> V2;
-    fn set_position(&mut self, pos: V2);
-    fn get_velocity(&self) -> V2;
-    fn set_velocity(&mut self, vel: V2);
+    fn get_position(&self) -> V3;
+    fn set_position(&mut self, pos: V3);
+    fn get_velocity(&self) -> V3;
+    fn set_velocity(&mut self, vel: V3);
     fn get_growth_rate(&self) -> Option<f32> { None }
     fn grow(&mut self, _amount: f32) {}
 }
@@ -211,7 +212,7 @@ impl BehaviorTree {
         Self { nodes }
     }
     
-    pub fn update(&self, entity: &mut dyn AIEntity, player_pos: &V2, delta_time: f32) -> AIAction {
+    pub fn update(&self, entity: &mut dyn AIEntity, player_pos: &V3, delta_time: f32) -> AIAction {
         // TODO: Implement behavior tree logic
         AIAction::Wander // Default action for now
     }

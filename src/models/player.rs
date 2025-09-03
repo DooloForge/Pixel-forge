@@ -1,4 +1,4 @@
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::models::ocean::FloatingItemType;
 use crate::constants::*;
 use std::collections::HashMap;
@@ -64,8 +64,8 @@ impl Inventory {
 
 #[turbo::serialize]
 pub struct Player {
-    pub pos: V2,
-    pub vel: V2,
+    pub pos: V3,
+    pub vel: V3,
     pub on_raft: bool,
     pub facing: f32,
     pub current_tool: Tool,
@@ -80,7 +80,7 @@ pub struct Player {
 }
 
 impl Player {
-    pub fn new(pos: V2) -> Self { 
+    pub fn new(pos: V3) -> Self { 
         let mut inventory = Inventory::new();
         // Give player some starting materials
         inventory.add_material(FloatingItemType::Wood, 10);
@@ -88,7 +88,7 @@ impl Player {
         
         Self { 
             pos, 
-            vel: V2::zero(), 
+            vel: V3::zero(), 
             on_raft: true, 
             facing: 0.0,
             current_tool: Tool::Hook,

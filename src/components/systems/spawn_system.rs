@@ -1,4 +1,4 @@
-use crate::math::Vec2 as V2;
+use crate::math::Vec3 as V3;
 use crate::models::particle::Particle;
 use turbo::random;
 
@@ -8,7 +8,8 @@ pub struct SpawnSystem {
     spawn_timers: std::collections::HashMap<SpawnType, u32>,
     spawn_rates: std::collections::HashMap<SpawnType, u32>,
     max_entities: std::collections::HashMap<SpawnType, usize>,
-    pending_spawns: Vec<(SpawnType, V2)>,
+    pending_spawns: Vec<(SpawnType, V3)>,
+    wind: V3,
 }
 
 #[derive(Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -45,11 +46,15 @@ impl SpawnSystem {
             spawn_rates,
             max_entities,
             pending_spawns: Vec::new(),
+            wind: V3::zero(),
         }
     }
     
+    /// Update cached wind vector used for directional spawns
+    pub fn set_wind(&mut self, wind: V3) { self.wind = wind; }
+    
     /// Update spawn timers and trigger spawns
-    pub fn update(&mut self, player_pos: &V2, current_counts: &std::collections::HashMap<SpawnType, usize>) {
+    pub fn update(&mut self, player_pos: &V3, current_counts: &std::collections::HashMap<SpawnType, usize>) {
         let spawn_types = [SpawnType::FloatingItem, SpawnType::Fish, SpawnType::Bubble, SpawnType::Coral, SpawnType::Treasure];
         
         for spawn_type in spawn_types {
@@ -71,7 +76,7 @@ impl SpawnSystem {
     }
     
     /// Trigger a specific spawn type
-    fn trigger_spawn(&mut self, spawn_type: &SpawnType, player_pos: &V2) {
+    fn trigger_spawn(&mut self, spawn_type: &SpawnType, player_pos: &V3) {
         match spawn_type {
             SpawnType::FloatingItem => self.spawn_floating_item(player_pos),
             SpawnType::Fish => self.spawn_fish(player_pos),
@@ -83,91 +88,93 @@ impl SpawnSystem {
     }
     
     /// Spawn a floating item near the player
-    fn spawn_floating_item(&mut self, player_pos: &V2) {
-        // Spawn off-screen behind the raft relative to the wind/current (assume left of player)
-        let lateral = (random::f32() - 0.5) * 200.0; // random horizontal offset
-        let x = player_pos.x - (400.0 + random::f32() * 200.0);
-        let y = (-20.0 + random::f32() * 40.0).max(-50.0) + lateral * 0.0; // keep near surface
-        let final_pos = V2::new(x, y);
+    fn spawn_floating_item(&mut self, player_pos: &V3) {
+        // Spawn at screen edge opposite to wind so it flows across the view
+        let (screen_w, screen_h) = turbo::resolution();
+        let half_w = screen_w as f32 * 0.5;
+        let half_h = screen_h as f32 * 0.5;
+        let margin = 40.0;
+        let wind_x = self.wind.x;
+        let spawn_left = if wind_x.abs() < 0.05 { random::f32() < 0.5 } else { wind_x > 0.0 };
+        let x = if spawn_left { player_pos.x - half_w - margin } else { player_pos.x + half_w + margin };
+        // Near the water surface (y ~ 0)
+        let y = (-4.0 + random::f32() * 8.0).clamp(-10.0, 10.0);
+        let final_pos = V3::new(x, y, 0.0);
         self.pending_spawns.push((SpawnType::FloatingItem, final_pos));
     }
     
     /// Spawn a fish near the player
-    fn spawn_fish(&mut self, player_pos: &V2) {
-        let angle = random::f32() * 6.28318;
-        let distance = 80.0 + random::f32() * 150.0;
-        let spawn_pos = V2::new(
-            player_pos.x + angle.cos() * distance,
-            player_pos.y + angle.sin() * distance
-        );
-        
-        // Ensure fish spawns underwater
-        let final_pos = V2::new(spawn_pos.x, (10.0 + random::f32() * 100.0).max(20.0));
-        
+    fn spawn_fish(&mut self, player_pos: &V3) {
+        // Spawn at left/right screen edges only, at underwater depths
+        let (screen_w, screen_h) = turbo::resolution();
+        let half_w = screen_w as f32 * 0.5;
+        let margin = 60.0;
+        let left_side = random::f32() < 0.5;
+        let x = if left_side { player_pos.x - half_w - margin } else { player_pos.x + half_w + margin };
+        // Underwater depth range
+        let y = (20.0 + random::f32() * (screen_h as f32 * 0.5)).max(20.0);
+        let final_pos = V3::new(x, y, 0.0);
         self.pending_spawns.push((SpawnType::Fish, final_pos));
     }
     
     /// Spawn a bubble particle
-    fn spawn_bubble(&self, player_pos: &V2) {
-        let offset = V2::new(
+    fn spawn_bubble(&mut self, player_pos: &V3) {
+        let offset = V3::new(
             (random::f32() - 0.5) * 20.0,
-            (random::f32() - 0.5) * 20.0
+            (random::f32() - 0.5) * 20.0,
+            0.0
         );
-        let spawn_pos = player_pos.add(offset);
-        
-        // TODO: Add to bubble collection
-        // This would be handled by the UnderwaterWorld system
+        let _spawn_pos = player_pos.add(offset);
+        // TODO: enqueue or create bubble entity when bubble system exists
     }
     
     /// Spawn coral formation
-    fn spawn_coral(&self, player_pos: &V2) {
+    fn spawn_coral(&mut self, player_pos: &V3) {
         let angle = random::f32() * 6.28318;
         let distance = 150.0 + random::f32() * 300.0;
-        let spawn_pos = V2::new(
+        let spawn_pos = V3::new(
             player_pos.x + angle.cos() * distance,
-            player_pos.y + angle.sin() * distance
+            player_pos.y + angle.sin() * distance,
+            0.0
         );
         
         // Ensure coral spawns deep underwater
-        let final_pos = V2::new(spawn_pos.x, (50.0 + random::f32() * 200.0).max(80.0));
-        
-        // TODO: Add to coral collection
-        // This would be handled by the UnderwaterWorld system
+        let _final_pos = V3::new(spawn_pos.x, (50.0 + random::f32() * 200.0).max(80.0), 0.0);
+        // TODO: enqueue coral when system exists
     }
     
     /// Spawn treasure
-    fn spawn_treasure(&self, player_pos: &V2) {
+    fn spawn_treasure(&mut self, player_pos: &V3) {
         let angle = random::f32() * 6.28318;
         let distance = 200.0 + random::f32() * 400.0;
-        let spawn_pos = V2::new(
+        let spawn_pos = V3::new(
             player_pos.x + angle.cos() * distance,
-            player_pos.y + angle.sin() * distance
+            player_pos.y + angle.sin() * distance,
+            0.0
         );
         
         // Ensure treasure spawns very deep underwater
-        let final_pos = V2::new(spawn_pos.x, (100.0 + random::f32() * 300.0).max(150.0));
-        
-        // TODO: Add to treasure collection
-        // This would be handled by the UnderwaterWorld system
+        let _final_pos = V3::new(spawn_pos.x, (100.0 + random::f32() * 300.0).max(150.0), 0.0);
+        // TODO: enqueue treasure when system exists
     }
 
     /// Drain pending spawn requests
-    pub fn drain_pending(&mut self) -> Vec<(SpawnType, V2)> {
+    pub fn drain_pending(&mut self) -> Vec<(SpawnType, V3)> {
         let mut out = Vec::new();
         std::mem::swap(&mut out, &mut self.pending_spawns);
         out
     }
     
     /// Spawn impact particles at a specific location
-    pub fn spawn_impact_particles(&self, pos: &V2, count: usize) -> Vec<Particle> {
+    pub fn spawn_impact_particles(&self, pos: &V3, count: usize) -> Vec<Particle> {
         let mut particles = Vec::new();
         
         for _ in 0..count {
             let angle = random::f32() * 6.28318;
             let speed = 0.5 + random::f32() * 2.0;
-            let velocity = V2::new(angle.cos() * speed, angle.sin() * speed - 1.0);
+            let velocity = V3::new(angle.cos() * speed, angle.sin() * speed - 1.0, 0.0);
             
-            particles.push(Particle::new(pos.clone(), velocity));
+            particles.push(Particle::new(V3::new(pos.x, pos.y, 0.0), velocity));
         }
         
         particles
