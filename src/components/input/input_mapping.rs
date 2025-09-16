@@ -24,6 +24,7 @@ impl InputMapping {
         default_bindings.insert("use_tool".to_string(), "MOUSE_LEFT".to_string());
         default_bindings.insert("switch_tool".to_string(), "E".to_string());
         default_bindings.insert("eat_food".to_string(), "F".to_string());
+        default_bindings.insert("collect_item".to_string(), "G".to_string());
         default_bindings.insert("open_inventory".to_string(), "I".to_string());
         default_bindings.insert("open_crafting".to_string(), "C".to_string());
         

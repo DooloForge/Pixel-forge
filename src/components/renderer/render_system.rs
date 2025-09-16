@@ -48,6 +48,25 @@ impl RenderSystem {
     /// Add entity to render queue
     pub fn add_entity(&mut self, entity: &Entity) {
         let mut render_data = entity.get_render_data();
+        let entity_type = entity.get_entity_type();
+        
+        // Hide entities based on view mode
+        match entity_type {
+            EntityType::Fish => {
+                // Hide fish in top-down mode
+                if self.view_mode == RenderViewMode::TopDown {
+                    return;
+                }
+            },
+            EntityType::FloatingItem => {
+                // Hide floating items in side-scroll mode
+                if self.view_mode == RenderViewMode::SideScroll {
+                    return;
+                }
+            },
+            _ => {} // Other entities visible in both modes
+        }
+        
         // Project world position into current view
         let world_pos = entity.get_world_position();
         render_data.screen_position = match self.view_mode {
@@ -57,7 +76,7 @@ impl RenderSystem {
         if render_data.visible {
             let command = RenderCommand::Entity {
                 data: render_data.clone(),
-                entity_type: entity.get_entity_type(),
+                entity_type,
             };
             self.render_queue.push(command);
         }
@@ -84,8 +103,6 @@ impl RenderSystem {
             }
         }
 
-        log!("Last player pos: {:?}", self.last_player_world_pos);
-        
         // Clear screen
         self.clear_screen();
         
@@ -305,6 +322,9 @@ impl RenderSystem {
                     EntityType::Particle => {
                         self.render_particle(screen_x, screen_y, data);
                     },
+                    EntityType::Hook => {
+                        self.render_hook(screen_x, screen_y, data);
+                    },
                     _ => {
                         // Default rendering for other entity types
                         circ!(d = data.size, position = (screen_x, screen_y), color = data.color, fixed = true);
@@ -398,7 +418,48 @@ impl RenderSystem {
     fn render_floating_item(&self, x: f32, y: f32, data: &RenderData) {
         // Add bobbing animation
         let bobbing = (x * 0.05).sin() * 3.0;
-        circ!(d = data.size, position = (x, y + bobbing), color = data.color, fixed = true);
+        let final_y = y + bobbing;
+        
+        // Render different shapes based on size (which indicates item type)
+        if data.size >= 12.0 {
+            // Large items (Wood, Barrel) - render as rectangles
+            rect!(
+                x = x - data.size * 0.5,
+                y = final_y - data.size * 0.3,
+                w = data.size,
+                h = data.size * 0.6,
+                color = data.color,
+                fixed = true
+            );
+        } else if data.size >= 8.0 {
+            // Medium items (Plastic, Rope, Metal, Cloth) - render as squares
+            rect!(
+                x = x - data.size * 0.5,
+                y = final_y - data.size * 0.5,
+                w = data.size,
+                h = data.size,
+                color = data.color,
+                fixed = true
+            );
+        } else {
+            // Small items (Nail, Coconut, Fish, etc.) - render as circles
+            circ!(d = data.size, position = (x, final_y), color = data.color, fixed = true);
+        }
+        
+        // Add a subtle outline for better visibility
+        let outline_color = (data.color & 0xFFFFFF00) | 0x80; // Same color with 50% alpha
+        if data.size >= 8.0 {
+            rect!(
+                x = x - data.size * 0.5 - 1.0,
+                y = final_y - data.size * 0.5 - 1.0,
+                w = data.size + 2.0,
+                h = data.size + 2.0,
+                color = outline_color,
+                fixed = true
+            );
+        } else {
+            circ!(d = data.size + 2.0, position = (x, final_y), color = outline_color, fixed = true);
+        }
     }
     
     /// Render particle
@@ -507,8 +568,94 @@ pub enum RenderCommand {
     },
 }
 
+#[derive(PartialEq)]
 #[turbo::serialize]
 pub enum RenderViewMode {
     TopDown,
     SideScroll,
+}
+
+impl RenderSystem {
+    /// Render hook with rectangular body, hook tip, and line to player
+    fn render_hook(&self, x: f32, y: f32, _data: &RenderData) {
+        // Compute player's screen position from cached world position and camera
+        let (screen_w, screen_h) = resolution();
+        let (cam_x, cam_y) = self.camera_pos;
+
+        if let Some(player_world) = &self.last_player_world_pos {
+            let player_screen_x = (player_world.x - cam_x) + screen_w as f32 * 0.5;
+            let player_screen_y = match self.view_mode {
+                RenderViewMode::TopDown => (player_world.y - cam_y) + screen_h as f32 * 0.5,
+                RenderViewMode::SideScroll => (-player_world.z - cam_y) + screen_h as f32 * 0.5,
+            };
+
+            // Draw thin line from hook to player using small rect segments
+            let dx = player_screen_x - x;
+            let dy = player_screen_y - y;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let steps = (distance / 2.0) as i32; // segment every 2 pixels
+
+            if steps > 0 {
+                let step_x = dx / steps as f32;
+                let step_y = dy / steps as f32;
+
+                for i in 0..steps {
+                    let line_x = x + step_x * i as f32;
+                    let line_y = y + step_y * i as f32;
+
+                    rect!(
+                        x = line_x - 0.5,
+                        y = line_y - 0.5,
+                        w = 1.0,
+                        h = 1.0,
+                        color = 0x8B4513FF,
+                        fixed = true
+                    );
+                }
+            }
+        }
+        
+        // Render hook body as a rectangle - make it very visible
+        rect!(
+            x = x - 6.0,
+            y = y - 3.0,
+            w = 12.0,
+            h = 6.0,
+            color = 0x8B4513FF, // Brown hook body
+            fixed = true
+        );
+        
+        // Add a bright white center to make it stand out
+        rect!(
+            x = x - 4.0,
+            y = y - 2.0,
+            w = 8.0,
+            h = 4.0,
+            color = 0xFFFFFFFF, // White center
+            fixed = true
+        );
+        
+        // Add a dark brown outline
+        rect!(
+            x = x - 7.0,
+            y = y - 4.0,
+            w = 14.0,
+            h = 8.0,
+            color = 0x654321FF, // Dark brown outline
+            fixed = true
+        );
+        
+        // Render the hook point as a small rectangle extending from the body
+        rect!(
+            x = x + 4.0,
+            y = y - 1.0,
+            w = 4.0,
+            h = 2.0,
+            color = 0x8B4513FF, // Brown hook point
+            fixed = true
+        );
+        
+        // Add a small circle at the very end to represent the hook tip
+        circ!(d = 3.0, position = (x + 7.0, y), color = 0x8B4513FF, fixed = true);
+    }
 }

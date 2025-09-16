@@ -8,9 +8,11 @@ pub mod terrain;
 pub mod crafting;
 pub mod ocean;
 pub mod raft;
+pub mod hook;
 
 pub use player::{Player, Tool};
 pub use particle::Particle;
 // pub use crafting::CraftingSystem;
 pub use ocean::{Ocean, FloatingItemType};
 pub use raft::{Raft, RaftTileType};
+pub use hook::{Hook, HookState};

@@ -51,6 +51,11 @@ impl EntityFactory {
         Entity::Monster(MonsterEntity::new(self.next_entity_id(), position, monster_type))
     }
     
+    /// Create a hook entity
+    pub fn create_hook(&mut self, owner_id: u32) -> Entity {
+        Entity::Hook(HookEntity::new(self.next_entity_id(), owner_id))
+    }
+    
     /// Get next entity ID
     fn next_entity_id(&mut self) -> u32 {
         let id = self.next_entity_id;
@@ -230,7 +235,8 @@ pub struct FloatingItemEntity {
 
 impl FloatingItemEntity {
     pub fn new(id: u32, position: V3, item_type: FloatingItemType) -> Self {
-        let render_data = RenderData::new(position.clone(), 8.0, item_type.color())
+        let size = item_type.size();
+        let render_data = RenderData::new(position.clone(), size, item_type.color())
             .with_layer(RenderLayer::Entity);
         
         Self {
@@ -314,6 +320,15 @@ pub struct MonsterEntity {
     pub render_data: RenderData,
 }
 
+/// Hook entity
+#[turbo::serialize]
+pub struct HookEntity {
+    pub id: u32,
+    pub hook: crate::models::hook::Hook,
+    pub render_data: RenderData,
+    pub player_pos: V3, // Store player position for line rendering
+}
+
 impl MonsterEntity {
     pub fn new(id: u32, position: V3, monster_type: MonsterType) -> Self {
         let (size, color) = match monster_type {
@@ -333,6 +348,22 @@ impl MonsterEntity {
             health: HealthComponent::new(200.0),
             stats: StatsComponent::new(1.5, 25.0, 15.0, 150.0),
             render_data,
+        }
+    }
+}
+
+impl HookEntity {
+    pub fn new(id: u32, owner_id: u32) -> Self {
+        let hook = crate::models::hook::Hook::new(owner_id);
+        // Start with hook position (will be updated when launched)
+        let render_data = RenderData::new(hook.position.clone(), 12.0, 0x8B4513FF) // Brown hook
+            .with_layer(RenderLayer::Entity);
+        
+        Self {
+            id,
+            hook,
+            render_data,
+            player_pos: V3::zero(), // Will be updated when hook is launched
         }
     }
 }

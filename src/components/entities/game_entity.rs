@@ -42,6 +42,7 @@ pub enum EntityType {
     Shark,
     FloatingItem,
     Particle,
+    Hook,
 }
 
 #[turbo::serialize]
@@ -52,6 +53,7 @@ pub enum Entity {
     Monster(super::entity_factory::MonsterEntity),
     FloatingItem(super::entity_factory::FloatingItemEntity),
     Particle(super::entity_factory::ParticleEntity),
+    Hook(super::entity_factory::HookEntity),
 }
 
 impl Entity {
@@ -63,6 +65,7 @@ impl Entity {
             Entity::Monster(e) => e.id,
             Entity::FloatingItem(e) => e.id,
             Entity::Particle(e) => e.id,
+            Entity::Hook(e) => e.id,
         }
     }
     pub fn get_entity_type(&self) -> EntityType {
@@ -73,6 +76,7 @@ impl Entity {
             Entity::Monster(_) => EntityType::Monster,
             Entity::FloatingItem(_) => EntityType::FloatingItem,
             Entity::Particle(_) => EntityType::Particle,
+            Entity::Hook(_) => EntityType::Hook,
         }
     }
     pub fn get_world_position(&self) -> Vec3 {
@@ -83,6 +87,7 @@ impl Entity {
             Entity::Monster(e) => e.position.clone(),
             Entity::FloatingItem(e) => e.position.clone(),
             Entity::Particle(e) => e.position.clone(),
+            Entity::Hook(e) => e.hook.position.clone(),
         }
     }
     pub fn set_world_position(&mut self, pos: Vec3) {
@@ -93,6 +98,7 @@ impl Entity {
             Entity::Monster(e) => { e.position = pos; }
             Entity::FloatingItem(e) => { e.position = pos; }
             Entity::Particle(e) => { e.position = pos; }
+            Entity::Hook(e) => { e.hook.position = pos; }
         }
     }
 
@@ -104,6 +110,7 @@ impl Entity {
             Entity::Monster(e) => e.render_data.clone(),
             Entity::FloatingItem(e) => e.render_data.clone(),
             Entity::Particle(e) => e.render_data.clone(),
+            Entity::Hook(e) => e.render_data.clone(),
         }
     }
 
@@ -115,6 +122,7 @@ impl Entity {
             Entity::Monster(e) => e.velocity.clone(),
             Entity::FloatingItem(e) => e.velocity.clone(),
             Entity::Particle(e) => e.velocity.clone(),
+            Entity::Hook(e) => e.hook.velocity.clone(),
         }
     }
     pub fn set_velocity(&mut self, vel: Vec3) {
@@ -125,11 +133,13 @@ impl Entity {
             Entity::Monster(e) => { e.velocity = vel; }
             Entity::FloatingItem(e) => { e.velocity = vel; }
             Entity::Particle(e) => { e.velocity = vel; }
+            Entity::Hook(e) => { e.hook.velocity = vel; }
         }
     }
     pub fn update(&mut self, delta_time: f32) {
         match self {
             Entity::Player(e) => {
+                // only update this for raft rendering distancing effect
                 e.render_data.world_position = e.player.pos.clone();
             },
             Entity::Raft(_e) => {},
@@ -160,6 +170,11 @@ impl Entity {
                 e.lifetime += delta_time;
                 // gravity handled where needed; keep parity with previous
             },
+            Entity::Hook(e) => {
+                // Hook update is handled in the hook system, not here
+                // Just update render position
+                e.render_data.world_position = e.hook.position.clone();
+            },
         }
     }
     pub fn should_remove(&self) -> bool {
@@ -167,6 +182,7 @@ impl Entity {
             Entity::Fish(e) => !e.health.is_alive() || e.lifetime > 300.0,
             Entity::FloatingItem(e) => e.lifetime > 600.0,
             Entity::Particle(e) => e.lifetime > e.max_lifetime,
+            Entity::Hook(e) => !e.hook.is_active(), // Remove when hook is retracted
             _ => false,
         }
     }

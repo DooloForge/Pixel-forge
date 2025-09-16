@@ -54,3 +54,6 @@ pub const UI_TEXT_ORANGE: u32 = 0xFFA500FF;
 pub const UI_TEXT_BLUE: u32 = 0x1E90FFFF;  // DodgerBlue
 pub const UI_TEXT_GRAY: u32 = 0xAAAAAAFF;
 pub const UI_PANEL_BG: u32 = 0x223344CC;   // Semi-transparent panel
+
+// Minimap
+pub const MINIMAP_RANGE: f32 = 200.0; // Distance in world units to show entities on minimap

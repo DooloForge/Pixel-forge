@@ -193,7 +193,9 @@ impl GameManager {
                     let pos = e.get_world_position();
                     let cur = self.physics_system.get_water_current_at(&pos);
                     let wind = self.physics_system.get_wind();
-                    let v = cur.add(wind.scale(0.8)); // floats push faster than raft
+                    // Make floating items flow much faster from left to right
+                    let base_flow = V3::new(6.0, 0.0, 0.0); // Much stronger left-to-right flow
+                    let v = base_flow.add(cur.scale(0.2)).add(wind.scale(0.3));
                     e.set_velocity(v);
                 }
             }
@@ -232,6 +234,13 @@ impl GameManager {
             }
             for id in to_remove { let _ = self.entity_manager.remove_entity(&mut self.entity_storage, id); }
         }
+        
+        // Update hook system
+        let player_pos = self.game_state.player.as_ref().map(|p| p.pos.clone());
+        if let Some(pos) = player_pos {
+            self.update_hooks(&pos, self.delta_time);
+        }
+        
         // Update-render entities
         self.entity_manager.update_entities(&mut self.entity_storage, self.delta_time);
         for entity in self.entity_manager.get_all_entities(&self.entity_storage) {
@@ -345,7 +354,8 @@ impl GameManager {
         for (stype, pos) in self.spawn_system.drain_pending() {
             match stype {
                 SpawnType::FloatingItem => {
-                    let item = self.entity_factory.create_floating_item(pos.clone(), crate::models::ocean::FloatingItemType::Wood);
+                    let item_type = self.get_random_floating_item_type();
+                    let item = self.entity_factory.create_floating_item(pos.clone(), item_type);
                     let _ = self.entity_manager.create_entity(&mut self.entity_storage, item);
                 }
                 SpawnType::Fish => {
@@ -357,6 +367,201 @@ impl GameManager {
         }
 
         // No event bus; handled via drain_pending above
+    }
+    
+    /// Get a random floating item type based on rarity
+    fn get_random_floating_item_type(&self) -> crate::models::ocean::FloatingItemType {
+        use crate::models::ocean::FloatingItemType;
+        use turbo::random;
+        
+        let rand = random::f32();
+        let mut cumulative = 0.0;
+        
+        let item_types = [
+            FloatingItemType::Wood,
+            FloatingItemType::Plastic,
+            FloatingItemType::Rope,
+            FloatingItemType::Metal,
+            FloatingItemType::Nail,
+            FloatingItemType::Cloth,
+            FloatingItemType::Barrel,
+            FloatingItemType::Coconut,
+            FloatingItemType::Fish,
+            FloatingItemType::Seaweed,
+            FloatingItemType::Treasure,
+            FloatingItemType::Bottle,
+        ];
+        
+        for item_type in item_types.iter() {
+            cumulative += item_type.rarity();
+            if rand <= cumulative {
+                return *item_type;
+            }
+        }
+        
+        // Fallback to wood if something goes wrong
+        FloatingItemType::Wood
+    }
+    
+    /// Handle hook launching
+    pub fn launch_hook(&mut self, player_pos: &V3, direction: crate::math::Vec2) {
+        // Check if player already has an active hook
+        let has_active_hook = self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Hook)
+            .iter()
+            .any(|&hook_id| {
+                if let Some(entity) = self.entity_manager.get_entity(&self.entity_storage, hook_id) {
+                    if let crate::components::entities::game_entity::Entity::Hook(hook_entity) = entity {
+                        return hook_entity.hook.is_active();
+                    }
+                }
+                false
+            });
+        
+        if !has_active_hook {
+            // Create new hook entity
+            let hook = self.entity_factory.create_hook(0); // TODO: Use actual player ID
+            let hook_id = self.entity_manager.create_entity(&mut self.entity_storage, hook);
+            
+            // Launch the hook
+            if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, hook_id) {
+                if let crate::components::entities::game_entity::Entity::Hook(hook_entity) = entity {
+                    hook_entity.hook.launch(*player_pos, direction);
+                    hook_entity.player_pos = *player_pos; // Store player position for line rendering
+                }
+            }
+        }
+    }
+    
+    /// Update hook system
+    pub fn update_hooks(&mut self, player_pos: &V3, delta_time: f32) {
+        let mut hooks_to_remove = Vec::new();
+        let mut collected_items = Vec::new();
+        
+        // First, collect all item positions to avoid borrowing conflicts
+        let item_positions: Vec<(u32, V3)> = self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::FloatingItem)
+            .into_iter()
+            .filter_map(|item_id| {
+                if let Some(item_entity) = self.entity_manager.get_entity(&self.entity_storage, item_id) {
+                    Some((item_id, item_entity.get_world_position()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        
+        // Get all hook IDs first to avoid borrowing conflicts
+        let hook_ids: Vec<u32> = self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Hook);
+        
+        for hook_id in hook_ids {
+            // We'll compute any pinning we need to do outside the hook's mutable borrow
+            let mut pin_request: Option<(Vec<u32>, V3)> = None;
+
+            if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, hook_id) {
+                if let crate::components::entities::game_entity::Entity::Hook(hook_entity) = entity {
+                    // Update hook physics
+                    let hook_completed = hook_entity.hook.update(delta_time, *player_pos);
+                    
+                    if hook_completed {
+                        // Hook has returned, collect attached items
+                        let attached_items = hook_entity.hook.detach_all_items();
+                        collected_items.extend(attached_items);
+                        hooks_to_remove.push(hook_id);
+                    } else {
+                        // Check for item collisions during hook travel
+                        let hook_tip_pos = hook_entity.hook.get_hook_tip_position();
+                        
+                        // Check collisions with each item using pre-collected positions
+                        for (item_id, item_pos) in &item_positions {
+                            let distance = hook_tip_pos.distance_to(item_pos);
+                            
+                            if distance <= 15.0 { // Hook collision range
+                                hook_entity.hook.attach_item(*item_id);
+                            }
+                        }
+
+                        // Clone attached items so we can move them after dropping the hook borrow
+                        let attached_ids = hook_entity.hook.attached_items.clone();
+                        pin_request = Some((attached_ids, hook_tip_pos));
+                    }
+                }
+            }
+
+            // If we have items attached to this hook, pin them to the hook tip visually
+            if let Some((attached_ids, hook_tip_pos)) = pin_request {
+                for (_i, item_id) in attached_ids.into_iter().enumerate() {
+                    if let Some(item_entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, item_id) {
+                        // Pin exactly at the hook tip to appear stuck to the head
+                        let pin_pos = V3::new(hook_tip_pos.x, hook_tip_pos.y, hook_tip_pos.z);
+                        item_entity.set_world_position(pin_pos);
+                        item_entity.set_velocity(V3::zero());
+                    }
+                }
+            }
+        }
+        
+        // Remove completed hooks
+        for hook_id in hooks_to_remove {
+            let _ = self.entity_manager.remove_entity(&mut self.entity_storage, hook_id);
+        }
+        
+        // Collect items that were attached to hooks
+        for item_id in collected_items {
+            if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, item_id) {
+                if let crate::components::entities::game_entity::Entity::FloatingItem(item_entity) = entity {
+                    let item_type = item_entity.item_type;
+                    
+                    // Add to player inventory
+                    if let Some(player) = &mut self.game_state.player {
+                        if player.inventory.add_material(item_type, 1) {
+                            // Successfully added to inventory, remove the entity
+                            let _ = self.entity_manager.remove_entity(&mut self.entity_storage, item_id);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Handle item collection mechanics (legacy method for manual collection)
+    pub fn handle_item_collection(&mut self, player_pos: &V3, use_hook: bool) {
+        if use_hook {
+            // Use hook system instead
+            return;
+        }
+        
+        let collection_range = 20.0; // Manual collection range
+        
+        let mut items_to_collect = Vec::new();
+        
+        // Find nearby floating items
+        for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::FloatingItem) {
+            if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
+                let item_pos = entity.get_world_position();
+                let distance = player_pos.distance_to(&item_pos);
+                
+                if distance <= collection_range {
+                    items_to_collect.push(id);
+                }
+            }
+        }
+        
+        // Collect the items
+        for item_id in items_to_collect {
+            if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, item_id) {
+                // Get the item type from the entity
+                if let crate::components::entities::game_entity::Entity::FloatingItem(item_entity) = entity {
+                    let item_type = item_entity.item_type;
+                    
+                    // Add to player inventory
+                    if let Some(player) = &mut self.game_state.player {
+                        if player.inventory.add_material(item_type, 1) {
+                            // Successfully added to inventory, remove the entity
+                            let _ = self.entity_manager.remove_entity(&mut self.entity_storage, item_id);
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /// Render UI/HUD elements
@@ -399,25 +604,33 @@ impl GameManager {
         let mut points: Vec<crate::components::renderer::ui_renderer::MinimapPoint> = Vec::new();
         let center = (40.0, 40.0);
         let scale = 0.1; // world units to minimap pixels
+        let minimap_range = crate::constants::MINIMAP_RANGE; // Only show entities within range of player
         if let Some(player) = &self.game_state.player {
             // Player at center
             points.push(crate::components::renderer::ui_renderer::MinimapPoint { x: center.0, y: center.1, size: 3.0, color: crate::constants::PLAYER_ON_RAFT_COLOR });
             for entity in self.entity_manager.get_all_entities(&self.entity_storage) {
                 let ety = crate::components::entities::game_entity::Entity::get_entity_type(entity);
                 let pos = crate::components::entities::game_entity::Entity::get_world_position(entity);
-                let dx = (pos.x - player.pos.x) * scale;
-                let dy = (pos.y - player.pos.y) * scale;
-                let x = (center.0 + dx).clamp(4.0, 76.0);
-                let y = (center.1 + dy).clamp(4.0, 76.0);
-                let (size, color) = match ety {
-                    crate::components::entities::game_entity::EntityType::FloatingItem => (2.0, 0xFFFF00FF),
-                    crate::components::entities::game_entity::EntityType::Fish => (2.0, 0x00FFFFFF),
-                    crate::components::entities::game_entity::EntityType::Raft => (3.0, crate::constants::RAFT_WOOD_FLOOR_COLOR),
-                    crate::components::entities::game_entity::EntityType::Monster => (3.0, 0xFF4444FF),
-                    crate::components::entities::game_entity::EntityType::Particle => (1.0, 0x888888FF),
-                    _ => (1.0, 0xFFFFFFFF),
-                };
-                points.push(crate::components::renderer::ui_renderer::MinimapPoint { x, y, size, color });
+                
+                // Calculate distance from player
+                let distance = ((pos.x - player.pos.x).powi(2) + (pos.y - player.pos.y).powi(2)).sqrt();
+                
+                // Only show entities within minimap range
+                if distance <= minimap_range {
+                    let dx = (pos.x - player.pos.x) * scale;
+                    let dy = (pos.y - player.pos.y) * scale;
+                    let x = (center.0 + dx).clamp(4.0, 76.0);
+                    let y = (center.1 + dy).clamp(4.0, 76.0);
+                    let (size, color) = match ety {
+                        crate::components::entities::game_entity::EntityType::FloatingItem => (2.0, 0xFFFF00FF),
+                        crate::components::entities::game_entity::EntityType::Fish => (2.0, 0x00FFFFFF),
+                        crate::components::entities::game_entity::EntityType::Raft => (3.0, crate::constants::RAFT_WOOD_FLOOR_COLOR),
+                        crate::components::entities::game_entity::EntityType::Monster => (3.0, 0xFF4444FF),
+                        crate::components::entities::game_entity::EntityType::Particle => (1.0, 0x888888FF),
+                        _ => (1.0, 0xFFFFFFFF),
+                    };
+                    points.push(crate::components::renderer::ui_renderer::MinimapPoint { x, y, size, color });
+                }
             }
         }
         ui_renderer.set_minimap_points(points);

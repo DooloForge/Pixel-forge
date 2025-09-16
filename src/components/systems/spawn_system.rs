@@ -10,6 +10,14 @@ pub struct SpawnSystem {
     max_entities: std::collections::HashMap<SpawnType, usize>,
     pending_spawns: Vec<(SpawnType, V3)>,
     wind: V3,
+    current_view_mode: ViewMode,
+}
+
+#[derive(Copy, PartialEq)]
+#[turbo::serialize]
+pub enum ViewMode {
+    TopDown,
+    SideScroll,
 }
 
 #[derive(Copy, Hash, Eq, PartialEq, Ord, PartialOrd)]
@@ -26,7 +34,7 @@ pub enum SpawnType {
 impl SpawnSystem {
     pub fn new() -> Self {
         let mut spawn_rates = std::collections::HashMap::new();
-        spawn_rates.insert(SpawnType::FloatingItem, 300); // Every 5 seconds
+        spawn_rates.insert(SpawnType::FloatingItem, 600); // Every 10 seconds
         spawn_rates.insert(SpawnType::Fish, 180);          // Every 3 seconds
         spawn_rates.insert(SpawnType::Bubble, 60);         // Every second
         spawn_rates.insert(SpawnType::Particle, 10);       // Every 1/6 second
@@ -47,17 +55,38 @@ impl SpawnSystem {
             max_entities,
             pending_spawns: Vec::new(),
             wind: V3::zero(),
+            current_view_mode: ViewMode::TopDown,
         }
     }
     
     /// Update cached wind vector used for directional spawns
     pub fn set_wind(&mut self, wind: V3) { self.wind = wind; }
     
+    /// Set the current view mode for spawning logic
+    pub fn set_view_mode(&mut self, mode: ViewMode) { self.current_view_mode = mode; }
+    
     /// Update spawn timers and trigger spawns
     pub fn update(&mut self, player_pos: &V3, current_counts: &std::collections::HashMap<SpawnType, usize>) {
         let spawn_types = [SpawnType::FloatingItem, SpawnType::Fish, SpawnType::Bubble, SpawnType::Coral, SpawnType::Treasure];
         
         for spawn_type in spawn_types {
+            // Skip spawning based on view mode
+            match spawn_type {
+                SpawnType::FloatingItem => {
+                    // Only spawn floating items in top-down mode
+                    if self.current_view_mode != ViewMode::TopDown {
+                        continue;
+                    }
+                },
+                SpawnType::Fish => {
+                    // Only spawn fish in side-scroll mode
+                    if self.current_view_mode != ViewMode::SideScroll {
+                        continue;
+                    }
+                },
+                _ => {} // Other types spawn in both modes
+            }
+            
             let rate = *self.spawn_rates.get(&spawn_type).unwrap_or(&300);
             let max_count = *self.max_entities.get(&spawn_type).unwrap_or(&50);
             let current_count = *current_counts.get(&spawn_type).unwrap_or(&0);
@@ -92,10 +121,11 @@ impl SpawnSystem {
         // Always spawn at left edge so it flows left -> right across the view
         let (screen_w, screen_h) = turbo::resolution();
         let half_w = screen_w as f32 * 0.5;
-        let margin = 40.0;
+        let half_h = screen_h as f32 * 0.5;
+        let margin = 60.0; // Spawn further off-screen
         let x = player_pos.x - half_w - margin;
-        // Near the water surface (y ~ 0)
-        let y = (-4.0 + random::f32() * 8.0).clamp(-10.0, 10.0);
+        // Much more Y variation - spread across a wider area
+        let y = player_pos.y + (-half_h * 0.6 + random::f32() * half_h * 1.2);
         let final_pos = V3::new(x, y, 0.0);
         self.pending_spawns.push((SpawnType::FloatingItem, final_pos));
     }

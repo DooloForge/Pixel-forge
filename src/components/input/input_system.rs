@@ -51,6 +51,7 @@ impl InputSystem {
             use_tool: mouse.left.just_pressed(),
             switch_tool: keyboard.key_e().just_pressed(),
             eat_food: keyboard.key_f().just_pressed(),
+            collect_item: keyboard.key_g().just_pressed(),
             dive: keyboard.space().just_pressed(),
             
             // UI
@@ -90,6 +91,7 @@ impl InputSystem {
             InputKey::UseTool => self.current_input_state.use_tool,
             InputKey::SwitchTool => self.current_input_state.switch_tool,
             InputKey::EatFood => self.current_input_state.eat_food,
+            InputKey::CollectItem => self.current_input_state.collect_item,
             InputKey::OpenInventory => self.current_input_state.open_inventory,
             InputKey::OpenCrafting => self.current_input_state.open_crafting,
             InputKey::CameraZoomIn => self.current_input_state.camera_zoom_in,
@@ -113,6 +115,7 @@ impl InputSystem {
             InputKey::UseTool => self.current_input_state.use_tool,
             InputKey::SwitchTool => self.current_input_state.switch_tool,
             InputKey::EatFood => self.current_input_state.eat_food,
+            InputKey::CollectItem => self.current_input_state.collect_item,
             InputKey::OpenInventory => self.current_input_state.open_inventory,
             InputKey::OpenCrafting => self.current_input_state.open_crafting,
             InputKey::CameraZoomIn => self.current_input_state.camera_zoom_in,
@@ -202,6 +205,7 @@ pub enum InputKey {
     UseTool,
     SwitchTool,
     EatFood,
+    CollectItem,
     OpenInventory,
     OpenCrafting,
     CameraZoomIn,
@@ -229,6 +233,7 @@ pub struct InputState {
     pub use_tool: bool,
     pub switch_tool: bool,
     pub eat_food: bool,
+    pub collect_item: bool,
     pub dive: bool,
     
     // UI
@@ -262,6 +267,7 @@ impl Default for InputState {
             use_tool: false,
             switch_tool: false,
             eat_food: false,
+            collect_item: false,
             dive: false,
             open_inventory: false,
             open_crafting: false,

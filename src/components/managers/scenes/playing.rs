@@ -11,6 +11,39 @@ pub fn update(gm: &mut GameManager) {
     let movement = gm.input_system.get_movement_vector();
     let water_current = gm.physics_system.get_water_current_at(&player_pos);
 
+    // Handle item collection first to avoid borrowing conflicts
+    let mut should_collect = false;
+    let mut use_hook = false;
+    let mut player_pos_for_collection = None;
+    
+    if let Some(player) = &gm.game_state.player {
+        if input_state.collect_item || (input_state.use_tool && player.current_tool == crate::models::player::Tool::Hook) {
+            should_collect = true;
+            use_hook = player.current_tool == crate::models::player::Tool::Hook;
+            player_pos_for_collection = Some(player.pos.clone());
+        }
+    }
+    
+    // Perform collection if needed
+    if should_collect {
+        if let Some(pos) = player_pos_for_collection {
+            if use_hook {
+                // Convert screen mouse to world coords based on camera centered at player in current view
+                // In TopDown, world.y maps to screen.y with camera at player
+                let (screen_w, screen_h) = turbo::resolution();
+                let mouse = input_state.mouse_pos;
+                let world_mouse = crate::math::Vec2::new(
+                    mouse.x - screen_w as f32 * 0.5 + pos.x,
+                    mouse.y - screen_h as f32 * 0.5 + pos.y,
+                );
+                let hook_direction = crate::math::Vec2::new(world_mouse.x - pos.x, world_mouse.y - pos.y);
+                gm.launch_hook(&pos, hook_direction);
+            } else {
+                gm.handle_item_collection(&pos, false);
+            }
+        }
+    }
+
     if let (Some(player), Some(raft)) = (&mut gm.game_state.player, &mut gm.game_state.raft) {
         super::super::game_manager::apply_player_input(player, &input_state, &movement);
         super::super::game_manager::apply_physics_update(player, &water_current, gm.delta_time);
@@ -52,11 +85,13 @@ pub fn update(gm: &mut GameManager) {
 
     match gm.game_state.game_mode {
         super::super::game_manager::GameMode::Raft => {
-            gm.spawn_system.set_spawn_rate(SpawnType::FloatingItem, 300);
+            gm.spawn_system.set_spawn_rate(SpawnType::FloatingItem, 600); // Reduced spawn rate - every 10 seconds
+            gm.spawn_system.set_view_mode(crate::components::systems::spawn_system::ViewMode::TopDown);
             gm.render_system.set_render_mode(crate::components::renderer::render_system::RenderViewMode::TopDown);
         }
         super::super::game_manager::GameMode::Dive => {
             gm.spawn_system.set_spawn_rate(SpawnType::FloatingItem, u32::MAX);
+            gm.spawn_system.set_view_mode(crate::components::systems::spawn_system::ViewMode::SideScroll);
             gm.render_system.set_render_mode(crate::components::renderer::render_system::RenderViewMode::SideScroll);
         }
     }
