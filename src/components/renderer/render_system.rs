@@ -27,6 +27,15 @@ impl RenderSystem {
         }
     }
     
+    /// Convert world position to screen position using current camera (centered)
+    fn world_to_screen(&self, world_pos: &Vec3) -> (f32, f32) {
+        let (screen_w, screen_h) = resolution();
+        (
+            world_pos.x - self.camera_pos.0 + screen_w as f32 * 0.5,
+            world_pos.y - self.camera_pos.1 + screen_h as f32 * 0.5,
+        )
+    }
+    
     /// Set camera target from world position; compute screen-plane y based on view mode
     pub fn set_camera_target(&mut self, world: Vec3) {
         let cam_y = match self.view_mode {
@@ -102,7 +111,7 @@ impl RenderSystem {
                 }
             }
         }
-
+        
         // Clear screen
         self.clear_screen();
         
@@ -172,7 +181,7 @@ impl RenderSystem {
     fn render_background_layers(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
         // In TopDown mode, draw a full-screen ocean background
         if let RenderViewMode::TopDown = self.view_mode {
-            self.render_ocean_fullscreen(screen_w, screen_h);
+            self.render_ocean_fullscreen(camera_pos, screen_w, screen_h);
             return;
         }
         // SideScroll and others: layered backgrounds
@@ -529,15 +538,82 @@ impl RenderSystem {
         }
     }
 
-    fn render_ocean_fullscreen(&self, screen_w: u32, screen_h: u32) {
-        // Simple vertical gradient fill for ocean in top-down view
-        for y in 0..screen_h {
-            let t = y as f32 / screen_h as f32;
-            let r = (0x41 as f32 * (1.0 - 0.2 * t)) as u32;
-            let g = (0x69 as f32 * (1.0 - 0.2 * t)) as u32;
-            let b = (0xE1 as f32 * (1.0 - 0.4 * t)) as u32;
+    fn render_ocean_fullscreen(&self, camera_pos: (f32, f32), screen_w: u32, screen_h: u32) {
+        // Top-down ocean using a repeating, tile-aligned depth pattern (structured, non-random)
+        // Draw per world tile to minimize draw calls and avoid stutter
+        let tile: f32 = 32.0;
+        let pattern_size: i32 = 8; // 8x8 cells repeat
+        let screen_w_f = screen_w as f32;
+        let screen_h_f = screen_h as f32;
+
+        // Base ocean color (steel blue-ish)
+        let base_r = 0x41 as f32;
+        let base_g = 0x69 as f32;
+        let base_b = 0xE1 as f32;
+
+        // Discrete shade multipliers (dark -> light)
+        let shades: [f32; 3] = [0.72, 0.82, 0.92];
+
+        // Hand-crafted 8x8 pattern of indices into shades[]
+        let pattern: [[u8; 8]; 8] = [
+            [1,1,1,1,2,2,2,1],
+            [1,0,0,1,2,2,1,1],
+            [1,0,0,1,1,1,1,1],
+            [1,1,1,1,1,1,0,0],
+            [2,2,1,1,1,1,0,0],
+            [2,2,1,1,1,1,1,1],
+            [2,1,1,1,1,1,1,2],
+            [1,1,1,2,2,2,1,1],
+        ];
+
+        // Compute visible world tile range
+        let world_left = camera_pos.0 - screen_w_f * 0.5;
+        let world_top  = camera_pos.1 - screen_h_f * 0.5;
+        let min_gx = (world_left / tile).floor() as i32 - 1;
+        let min_gy = (world_top  / tile).floor() as i32 - 1;
+        let max_gx = ((world_left + screen_w_f) / tile).ceil() as i32 + 1;
+        let max_gy = ((world_top  + screen_h_f) / tile).ceil() as i32 + 1;
+
+        // Collect wave positions to draw after filling tiles, so they are not overdrawn
+        let mut wave_positions: Vec<(f32, f32)> = Vec::new();
+
+        for gy in min_gy..=max_gy {
+            for gx in min_gx..=max_gx {
+                // Pattern index
+                let mx = ((gx % pattern_size) + pattern_size) % pattern_size;
+                let my = ((gy % pattern_size) + pattern_size) % pattern_size;
+                let idx = pattern[my as usize][mx as usize] as usize;
+                let mut shade = shades[idx];
+
+                // World tile center for a tiny ripple once per tile
+                let cx = gx as f32 * tile + tile * 0.5;
+                let cy = gy as f32 * tile + tile * 0.5;
+                let ripple = ((cx * 0.02).sin() * (cy * 0.017).cos()) * 0.012;
+                shade = (shade + ripple).clamp(0.6, 1.0);
+
+                // Convert world tile to screen rect
+                let screen_x = (gx as f32 * tile - camera_pos.0) + screen_w_f * 0.5;
+                let screen_y = (gy as f32 * tile - camera_pos.1) + screen_h_f * 0.5;
+
+                let r = (base_r * shade) as u32;
+                let g = (base_g * shade) as u32;
+                let b = (base_b * shade) as u32;
             let color = (r << 24) | (g << 16) | (b << 8) | 0xFF;
-            rect!(x = 0.0, y = y as f32, w = screen_w as f32, h = 1.0, color = color, fixed = true);
+
+                rect!(x = screen_x, y = screen_y, w = tile, h = tile, color = color, fixed = true);
+
+                // Queue wave sprite world positions for a second pass
+                if idx == 2 && ((gx + gy) & 1) == 0 {
+                    let world_cx = gx as f32 * tile + tile * 0.5;
+                    let world_cy = gy as f32 * tile + tile * 0.5;
+                    wave_positions.push((world_cx, world_cy));
+                }
+            }
+        }
+
+        // Second pass: draw waves on top so they are not truncated by later tile fills
+        for (wx, wy) in wave_positions.into_iter() {
+            sprite!("waves", position = (wx, wy), size = (20.0, 20.0), origin = (10.0, 10.0));
         }
     }
 }

@@ -31,7 +31,7 @@ impl Hook {
             direction: V2::new(1.0, 0.0), // Default right direction
             length: 0.0,
             max_length: 100.0,
-            speed: 20.0, // Much faster speed - 20 units per second
+            speed: 80.0, // Much faster speed - 20 units per second
             state: HookState::Retracted,
             attached_items: Vec::new(),
             owner_id,

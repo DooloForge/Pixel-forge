@@ -9,7 +9,18 @@ pub fn update(gm: &mut GameManager) {
 
     let input_state = gm.input_system.get_input_state().clone();
     let movement = gm.input_system.get_movement_vector();
-    let water_current = gm.physics_system.get_water_current_at(&player_pos);
+
+    // Hotbar quick-select 0-9 maps to quick slots 0-9
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem1) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(0); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem2) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(1); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem3) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(2); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem4) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(3); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem5) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(4); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem6) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(5); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem7) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(6); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem8) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(7); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem9) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(8); } }
+    if gm.input_system.is_key_just_pressed(crate::components::input::input_system::InputKey::QuickItem0) { if let Some(p) = &mut gm.game_state.player { let _ = p.use_quick_item(9); } }
 
     // Handle item collection first to avoid borrowing conflicts
     let mut should_collect = false;
@@ -45,8 +56,46 @@ pub fn update(gm: &mut GameManager) {
     }
 
     if let (Some(player), Some(raft)) = (&mut gm.game_state.player, &mut gm.game_state.raft) {
+        // Hotbar drag & drop (HUD) when not in inventory scene
+        // Geometry mirrors UIRenderer::render_hotbar
+        let (screen_w, screen_h) = turbo::resolution();
+        let slot_size = 24.0_f32;
+        let margin = 4.0_f32;
+        let count = 10usize;
+        let total_w = count as f32 * slot_size + (count as f32 - 1.0) * margin;
+        let start_x = (screen_w as f32 - total_w) * 0.5;
+        let y = screen_h as f32 - slot_size - 8.0;
+        let mouse = gm.input_system.get_screen_mouse_position();
+        let left_click = gm.input_system.is_mouse_left_just_pressed();
+        let left_held = gm.input_system.is_mouse_left_held();
+        // Only allow when not in inventory scene
+        if gm.current_scene == super::super::game_manager::SceneType::Playing {
+            // Hit-test hotbar slot under mouse
+            let mut hovered_hotbar: Option<usize> = None;
+            for i in 0..count {
+                let x = start_x + i as f32 * (slot_size + margin);
+                if mouse.x >= x && mouse.x <= x + slot_size && mouse.y >= y && mouse.y <= y + slot_size {
+                    hovered_hotbar = Some(i);
+                    break;
+                }
+            }
+            // Begin drag on press
+            if left_click && gm.game_state.dragging_slot.is_none() {
+                if let Some(idx) = hovered_hotbar { gm.game_state.dragging_slot = Some(idx); }
+            }
+            // On release, drop into hovered hotbar slot; swap inventory slots 0..9
+            if !left_held {
+                if let Some(src) = gm.game_state.dragging_slot.take() {
+                    if let Some(dst) = hovered_hotbar {
+                        if src != dst {
+                            let _ = player.inventory.swap_slots(src, dst);
+                        }
+                    }
+                }
+            }
+        }
         super::super::game_manager::apply_player_input(player, &input_state, &movement);
-        super::super::game_manager::apply_physics_update(player, &water_current, gm.delta_time);
+        super::super::game_manager::apply_physics_update(player, &gm.game_state.wind, gm.delta_time);
 
         player.on_raft = raft.is_on_raft(&player.pos);
 

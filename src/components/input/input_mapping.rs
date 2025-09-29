@@ -27,6 +27,12 @@ impl InputMapping {
         default_bindings.insert("collect_item".to_string(), "G".to_string());
         default_bindings.insert("open_inventory".to_string(), "I".to_string());
         default_bindings.insert("open_crafting".to_string(), "C".to_string());
+        default_bindings.insert("craft_item".to_string(), "Space".to_string());
+        default_bindings.insert("quick_item_1".to_string(), "Digit1".to_string());
+        default_bindings.insert("quick_item_2".to_string(), "Digit2".to_string());
+        default_bindings.insert("quick_item_3".to_string(), "Digit3".to_string());
+        default_bindings.insert("quick_item_4".to_string(), "Digit4".to_string());
+        default_bindings.insert("quick_item_5".to_string(), "Digit5".to_string());
         
         Self {
             key_bindings: default_bindings.clone(),

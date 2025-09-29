@@ -103,6 +103,53 @@ impl FloatingItemType {
             FloatingItemType::Bottle => 0.05,
         }
     }
+    
+    pub fn max_stack_size(&self) -> u32 {
+        match self {
+            // Building materials - medium stacks
+            FloatingItemType::Wood => 32,
+            FloatingItemType::Plastic => 32,
+            FloatingItemType::Rope => 16,
+            FloatingItemType::Metal => 16,
+            FloatingItemType::Nail => 64,
+            FloatingItemType::Cloth => 16,
+            FloatingItemType::Barrel => 4,
+            
+            // Food items - small stacks (perishable)
+            FloatingItemType::Coconut => 8,
+            FloatingItemType::Fish => 4,
+            FloatingItemType::Seaweed => 16,
+            
+            // Special items - very small stacks
+            FloatingItemType::Treasure => 1,
+            FloatingItemType::Bottle => 8,
+        }
+    }
+    
+    pub fn is_consumable(&self) -> bool {
+        matches!(self, 
+            FloatingItemType::Coconut | 
+            FloatingItemType::Fish | 
+            FloatingItemType::Seaweed
+        )
+    }
+    
+    pub fn hunger_restore(&self) -> f32 {
+        match self {
+            FloatingItemType::Coconut => 15.0,
+            FloatingItemType::Fish => 25.0,
+            FloatingItemType::Seaweed => 5.0,
+            _ => 0.0,
+        }
+    }
+    
+    pub fn thirst_restore(&self) -> f32 {
+        match self {
+            FloatingItemType::Coconut => 20.0,
+            FloatingItemType::Bottle => 30.0,
+            _ => 0.0,
+        }
+    }
 }
 
 

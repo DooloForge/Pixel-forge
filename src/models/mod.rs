@@ -1,8 +1,5 @@
-pub mod physics_body;
 pub mod player;
-pub mod bullet;
 pub mod particle;
-pub mod wall;
 pub mod monster;
 pub mod terrain;
 pub mod crafting;

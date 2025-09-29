@@ -1,3 +1,5 @@
+use turbo::rect;
+
 use crate::math::Vec3 as V3;
 use crate::components::systems::*;
 use crate::components::renderer::*;
@@ -11,9 +13,9 @@ use crate::models::player::Player;
 use crate::models::raft::Raft;
 use crate::models::ocean::Ocean;
 use crate::models::particle::Particle;
+use crate::models::crafting::CraftingSystem;
 
 /// Game state structure
-#[derive(Default)]
 #[turbo::serialize]
 pub struct GameState {
     pub player: Option<Player>,
@@ -24,6 +26,29 @@ pub struct GameState {
     pub raft_entity_id: Option<u32>,
     pub ui_mode: UiMode,
     pub game_mode: GameMode,
+    pub crafting_system: CraftingSystem,
+    pub wind: V3,
+    pub inventory_context_menu: Option<InventoryContextMenu>,
+    pub dragging_slot: Option<usize>,
+}
+
+impl Default for GameState {
+    fn default() -> Self {
+        Self {
+            player: None,
+            raft: None,
+            ocean: None,
+            particles: Vec::new(),
+            player_entity_id: None,
+            raft_entity_id: None,
+            ui_mode: UiMode::default(),
+            game_mode: GameMode::default(),
+            crafting_system: CraftingSystem::new(),
+            wind: V3::zero(),
+            inventory_context_menu: None,
+            dragging_slot: None,
+        }
+    }
 }
 
 /// UI modes
@@ -64,7 +89,6 @@ pub enum SceneType {
 #[turbo::serialize]
 pub struct GameManager {
     // Systems
-    pub(crate) physics_system: PhysicsSystem,
     pub(crate) spawn_system: SpawnSystem,
     pub(crate) world_system: WorldSystem,
     pub(crate) ai_system: AISystem,
@@ -92,10 +116,16 @@ pub struct GameManager {
     pub(crate) frame_count: u64,
 }
 
+#[turbo::serialize]
+pub struct InventoryContextMenu {
+    pub slot_index: usize,
+    pub screen_x: f32,
+    pub screen_y: f32,
+}
+
 impl GameManager {
     pub fn new() -> Self {
         let mut game_manager = Self {
-            physics_system: PhysicsSystem::new(),
             spawn_system: SpawnSystem::new(),
             world_system: WorldSystem::new(12345), // Fixed seed for now
             ai_system: AISystem::new(),
@@ -130,14 +160,8 @@ impl GameManager {
         self.spawn_system.set_spawn_rate(SpawnType::FloatingItem, 300);
         self.spawn_system.set_spawn_rate(SpawnType::Fish, 180);
         self.spawn_system.set_spawn_rate(SpawnType::Bubble, 60);
-        
-        // Set up physics system
-        self.physics_system.set_wind(V3::new(1.0, 0.0, 0.0), 0.5);
-        // Add a broad, slow surface current so floats drift in raft mode
-        self.physics_system.add_water_current(V3::new(0.0, 0.0, 0.0), V3::new(1.0, 0.0, 0.0), 0.6);
-        // Mirror wind into spawner for directional edge spawns
-        let wind = self.physics_system.get_wind();
-        self.spawn_system.set_wind(wind);
+        self.game_state.wind = V3::new(1.0, 0.0, 0.0);
+        self.spawn_system.set_wind(V3::new(1.0, 0.0, 0.0));
     }
     
     /// Main update loop
@@ -173,10 +197,9 @@ impl GameManager {
         // Move raft world position with sea and optionally autopilot, and carry player if on raft
         let (player_on_raft, player_diving) = if let Some(p) = &self.game_state.player { (p.on_raft, p.is_diving) } else { (false, false) };
         if let Some(raft) = &mut self.game_state.raft {
-            let cur = self.physics_system.get_water_current_at(&raft.center);
-            let wind = self.physics_system.get_wind();
+            let wind = self.game_state.wind;
             // Slow tide-driven drift
-            let drift = cur.scale(0.6).add(wind.scale(0.2));
+            let drift = wind.scale(0.2);
             let delta = drift.scale(self.delta_time);
             raft.center = raft.center.add(delta);
             if player_on_raft {
@@ -191,29 +214,24 @@ impl GameManager {
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::FloatingItem) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
                     let pos = e.get_world_position();
-                    let cur = self.physics_system.get_water_current_at(&pos);
-                    let wind = self.physics_system.get_wind();
                     // Make floating items flow much faster from left to right
                     let base_flow = V3::new(6.0, 0.0, 0.0); // Much stronger left-to-right flow
-                    let v = base_flow.add(cur.scale(0.2)).add(wind.scale(0.3));
+                    let v = base_flow.add(self.game_state.wind.scale(0.3));
                     e.set_velocity(v);
                 }
             }
             // Fish drift with currents/wind
             for id in self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Fish) {
                 if let Some(e) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id) {
-                    let pos = e.get_world_position();
-                    let cur = self.physics_system.get_water_current_at(&pos);
-                    let wind = self.physics_system.get_wind();
-                    e.set_velocity(cur.add(wind.scale(0.2)));
+                    let wind = self.game_state.wind;
+                    e.set_velocity(wind.scale(0.2));
                 }
             }
             // Raft drifts slowly with surface current in Raft mode
             if self.game_state.game_mode == GameMode::Raft {
                 if let Some(raft_id) = self.game_state.raft_entity_id {
                     if let Some(raft_entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, raft_id) {
-                        let cur = self.physics_system.get_water_current_at(&raft_entity.get_world_position());
-                        raft_entity.set_velocity(cur.scale(0.3));
+                        raft_entity.set_velocity(self.game_state.wind.scale(0.3));
                     }
                 }
             }
@@ -348,7 +366,7 @@ impl GameManager {
         
         // Update spawn system
         // Keep wind in sync
-        self.spawn_system.set_wind(self.physics_system.get_wind());
+        self.spawn_system.set_wind(self.game_state.wind);
         self.spawn_system.update(player_pos, &current_counts);
         // Consume pending spawns and create entities
         for (stype, pos) in self.spawn_system.drain_pending() {
@@ -449,6 +467,20 @@ impl GameManager {
             })
             .collect();
         
+        // Also collect all fish positions to avoid borrowing conflicts later
+        let fish_positions: Vec<(u32, V3)> = self
+            .entity_manager
+            .get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Fish)
+            .into_iter()
+            .filter_map(|fish_id| {
+                if let Some(fish_entity) = self.entity_manager.get_entity(&self.entity_storage, fish_id) {
+                    Some((fish_id, fish_entity.get_world_position()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
         // Get all hook IDs first to avoid borrowing conflicts
         let hook_ids: Vec<u32> = self.entity_manager.get_entity_ids_by_type(crate::components::entities::game_entity::EntityType::Hook);
         
@@ -470,12 +502,27 @@ impl GameManager {
                         // Check for item collisions during hook travel
                         let hook_tip_pos = hook_entity.hook.get_hook_tip_position();
                         
-                        // Check collisions with each item using pre-collected positions
+                        // Check collisions with floating items
                         for (item_id, item_pos) in &item_positions {
                             let distance = hook_tip_pos.distance_to(item_pos);
                             
                             if distance <= 15.0 { // Hook collision range
                                 hook_entity.hook.attach_item(*item_id);
+                            }
+                        }
+                        
+                        // Check collisions with fish (fishing mechanics) using pre-collected positions
+                        for (fish_id, fish_pos) in &fish_positions {
+                            let distance = hook_tip_pos.distance_to(fish_pos);
+
+                            // Fishing requires being underwater (negative z) and closer range
+                            if distance <= 12.0 && hook_tip_pos.z < -5.0 {
+                                // Depth-based catch chance (avoid immutable borrow during mutable hook borrow)
+                                let depth = -hook_tip_pos.z;
+                                let catch_chance = if depth > 50.0 { 0.6 } else if depth > 20.0 { 0.5 } else { 0.3 };
+                                if turbo::random::f32() < catch_chance {
+                                    hook_entity.hook.attach_item(*fish_id);
+                                }
                             }
                         }
 
@@ -507,18 +554,67 @@ impl GameManager {
         // Collect items that were attached to hooks
         for item_id in collected_items {
             if let Some(entity) = self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, item_id) {
-                if let crate::components::entities::game_entity::Entity::FloatingItem(item_entity) = entity {
-                    let item_type = item_entity.item_type;
-                    
-                    // Add to player inventory
-                    if let Some(player) = &mut self.game_state.player {
-                        if player.inventory.add_material(item_type, 1) {
-                            // Successfully added to inventory, remove the entity
-                            let _ = self.entity_manager.remove_entity(&mut self.entity_storage, item_id);
+                match entity {
+                    crate::components::entities::game_entity::Entity::FloatingItem(item_entity) => {
+                        let item_type = item_entity.item_type;
+                        let item_pos = item_entity.position.clone();
+                        
+                        // Add to player inventory
+                        if let Some(player) = &mut self.game_state.player {
+                            if player.inventory.add_material(item_type, 1) {
+                                // Successfully added to inventory, remove the entity
+                                let _ = self.entity_manager.remove_entity(&mut self.entity_storage, item_id);
+                            }
                         }
-                    }
+                    },
+                    crate::components::entities::game_entity::Entity::Fish(_fish_entity) => {
+                        // Convert caught fish to fish item
+                        if let Some(player) = &mut self.game_state.player {
+                            if player.inventory.add_material(crate::models::ocean::FloatingItemType::Fish, 1) {
+                                // Successfully added fish to inventory, remove the entity
+                                let _ = self.entity_manager.remove_entity(&mut self.entity_storage, item_id);
+                            }
+                        }
+                    },
+                    _ => {} // Other entity types not collectible
                 }
             }
+        }
+    }
+    
+    /// Calculate the chance to catch a fish based on depth and fish type
+    fn calculate_fish_catch_chance(&self, hook_pos: &V3, fish_entity: &crate::components::entities::game_entity::Entity) -> f32 {
+        if let crate::components::entities::game_entity::Entity::Fish(fish) = fish_entity {
+            let base_chance = match fish.fish_type {
+                crate::components::entities::entity_factory::FishType::SmallFish => 0.7,
+                crate::components::entities::entity_factory::FishType::TropicalFish => 0.5,
+                crate::components::entities::entity_factory::FishType::DeepSeaFish => 0.3,
+                crate::components::entities::entity_factory::FishType::Shark => 0.1, // Very hard to catch
+            };
+            
+            // Depth bonus - deeper fishing is more rewarding but harder
+            let depth = -hook_pos.z; // Negative z is underwater depth
+            let depth_modifier = if depth > 50.0 {
+                1.2 // Deep water bonus
+            } else if depth > 20.0 {
+                1.0 // Normal depth
+            } else {
+                0.8 // Shallow water penalty
+            };
+            
+            // Player tool bonus (could be expanded for fishing rod)
+            let tool_modifier = if let Some(player) = &self.game_state.player {
+                match player.current_tool {
+                    crate::models::player::Tool::Hook => 1.0,
+                    _ => 0.5, // Other tools are less effective for fishing
+                }
+            } else {
+                1.0
+            };
+            
+            f32::min(base_chance * depth_modifier * tool_modifier, 0.9_f32) // Cap at 90% chance
+        } else {
+            0.0
         }
     }
     
@@ -551,6 +647,7 @@ impl GameManager {
                 // Get the item type from the entity
                 if let crate::components::entities::game_entity::Entity::FloatingItem(item_entity) = entity {
                     let item_type = item_entity.item_type;
+                    let item_pos = item_entity.position.clone();
                     
                     // Add to player inventory
                     if let Some(player) = &mut self.game_state.player {
@@ -589,6 +686,15 @@ impl GameManager {
             let status = if player.is_diving { "Diving" } else if player.on_raft { "On Raft" } else { "Swimming" }.to_string();
             let player_pos_str = Some(format!("Player: ({:.1}, {:.1}, {:.1})", player.pos.x, player.pos.y, player.pos.z));
             let raft_pos_str = self.game_state.raft.as_ref().map(|r| format!("Raft: ({:.1}, {:.1}, {:.1})", r.center.x, r.center.y, r.center.z));
+            // Build hotbar HUD items from slots 0..9 directly
+            let mut hotbar_items: Vec<Option<(u32, u32)>> = vec![None; 10];
+            for i in 0..10usize {
+                if let Some(slot) = player.inventory.get_slot(i) {
+                    if let Some(t) = slot.item_type {
+                        hotbar_items[i] = Some((t.color(), slot.quantity));
+                    }
+                }
+            }
             ui_renderer.set_hud_state(crate::components::renderer::ui_renderer::HudState {
                 tool: tool_name,
                 health: player.health,
@@ -597,6 +703,8 @@ impl GameManager {
                 status,
                 player_pos: player_pos_str,
                 raft_pos: raft_pos_str,
+                hotbar_items: Some(hotbar_items),
+                hotbar_active: None,
             });
         }
 
@@ -635,8 +743,49 @@ impl GameManager {
         }
         ui_renderer.set_minimap_points(points);
         
-        // Render the UI
-        ui_renderer.render();
+        // Render the UI with context-specific data
+        match self.current_scene {
+            SceneType::Inventory => {
+                if let Some(player) = &self.game_state.player {
+                    // If dragging, show drag preview with the dragged slot's color/qty under mouse
+                    let dragging_preview = if let Some(src) = self.game_state.dragging_slot {
+                        if let Some(slot) = player.inventory.get_slot(src) {
+                            if let Some(t) = slot.item_type {
+                                let mouse = self.input_system.get_screen_mouse_position();
+                                Some((t.color(), slot.quantity, mouse.x, mouse.y))
+                            } else { None }
+                        } else { None }
+                    } else { None };
+                    ui_renderer.render_inventory_with_data_and_drag(Some(&player.inventory), dragging_preview);
+                } else {
+                    ui_renderer.render();
+                }
+            },
+            SceneType::Crafting => {
+                if let Some(player) = &self.game_state.player {
+                    ui_renderer.render_crafting_with_data(Some(&self.game_state.crafting_system), Some(&player.inventory));
+                } else {
+                    ui_renderer.render();
+                }
+            },
+            _ => {
+                ui_renderer.render();
+                // Overlay drag preview if dragging a hotbar slot while not in inventory
+                if let Some(player) = &self.game_state.player {
+                    if let Some(src) = self.game_state.dragging_slot {
+                        if src < 10 {
+                            if let Some(slot) = player.inventory.get_slot(src) {
+                                if let Some(t) = slot.item_type {
+                                    let mouse = self.input_system.get_screen_mouse_position();
+                                    let s = 20.0_f32;
+                                    rect!(x = mouse.x - s * 0.5, y = mouse.y - s * 0.5, w = s, h = s, color = t.color(), fixed = true);
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        }
     }
 }
 
@@ -668,9 +817,7 @@ pub(crate) fn apply_player_input(player: &mut Player, input_state: &crate::compo
     // on_raft is determined by the caller (uses top-down position when in Dive)
     
     if input_state.eat_food {
-        if player.inventory.remove_material(crate::models::ocean::FloatingItemType::Coconut, 1) {
-            player.eat_food(crate::models::ocean::FloatingItemType::Coconut);
-        }
+        player.consume_item(crate::models::ocean::FloatingItemType::Coconut);
     }
     
     player.update_cooldowns();
