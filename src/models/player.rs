@@ -215,6 +215,8 @@ pub struct Player {
     pub depth: i32,         // Current depth (0 = surface, negative = underwater)
     pub breath: f32,        // Oxygen/breath level
     pub is_diving: bool,    // Whether player is underwater
+    pub last_movement: V3,  // Last movement direction for animation
+    pub is_moving: bool,    // Whether player is currently moving
 }
 
 impl Player {
@@ -254,6 +256,8 @@ impl Player {
             depth: SURFACE_DEPTH,
             breath: MAX_BREATH,
             is_diving: false,
+            last_movement: V3::zero(),
+            is_moving: false,
         } 
     }
     

@@ -25,6 +25,11 @@ impl EntityFactory {
         Entity::Player(PlayerEntity::new(self.next_entity_id(), player))
     }
     
+    /// Create a player entity from existing player data
+    pub fn create_player_from_existing(&mut self, player: Player) -> Entity {
+        Entity::Player(PlayerEntity::new(self.next_entity_id(), player))
+    }
+    
     /// Create a raft entity
     pub fn create_raft(&mut self, position: V3) -> Entity {
         let raft = Raft::new(position);

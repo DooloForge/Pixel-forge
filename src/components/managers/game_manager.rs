@@ -185,6 +185,14 @@ impl GameManager {
             if let (Some(player), Some(entity)) = (self.game_state.player.as_ref(), self.entity_manager.get_entity_mut_by_id(&mut self.entity_storage, id)) {
                 entity.set_world_position(player.pos.clone());
                 entity.set_velocity(player.vel.clone());
+                
+                // Update render data with movement information
+                let mut render_data = entity.get_render_data();
+                render_data.player_is_moving = player.is_moving;
+                render_data.player_last_movement = player.last_movement.clone();
+                render_data.player_on_raft = player.on_raft;
+                entity.update_render_data(render_data);
+                // log!("Render data world pos after sync: x={}, y={}, z={}", updated_render_data.world_position.x, updated_render_data.world_position.y, updated_render_data.world_position.z);
             }
         }
         if let Some(id) = self.game_state.raft_entity_id {
@@ -261,8 +269,20 @@ impl GameManager {
         
         // Update-render entities
         self.entity_manager.update_entities(&mut self.entity_storage, self.delta_time);
+        
+        // Add entities to render queue, special handling for player
         for entity in self.entity_manager.get_all_entities(&self.entity_storage) {
-            self.render_system.add_entity(entity);
+            let entity_type = entity.get_entity_type();
+            if let crate::components::entities::game_entity::EntityType::Player = entity_type {
+                // Special handling for player with movement data
+                if let Some(player) = &self.game_state.player {
+                    self.render_system.add_player_entity(entity, player.is_moving, &player.last_movement);
+                } else {
+                    self.render_system.add_entity(entity);
+                }
+            } else {
+                self.render_system.add_entity(entity);
+            }
         }
         // Render world then UI once per frame after scene update
         self.render_system.render();
@@ -329,7 +349,7 @@ impl GameManager {
         // Create entities and initialize camera to center on player
         if let Some(player) = &self.game_state.player {
             if self.game_state.player_entity_id.is_none() {
-                let e = self.entity_factory.create_player(player.pos.clone());
+                let e = self.entity_factory.create_player_from_existing(player.clone());
                 let id = self.entity_manager.create_entity(&mut self.entity_storage, e);
                 self.game_state.player_entity_id = Some(id);
             }
@@ -794,6 +814,14 @@ pub(crate) fn apply_player_input(player: &mut Player, input_state: &crate::compo
     // Tool switching
     if input_state.switch_tool {
         player.switch_tool();
+    }
+    
+    // Track movement for animation
+    let movement_magnitude = (movement.x * movement.x + movement.y * movement.y + movement.z * movement.z).sqrt();
+    player.is_moving = movement_magnitude > 0.1;
+    
+    if player.is_moving {
+        player.last_movement = *movement;
     }
     
     // Movement: raft vs swim vs dive

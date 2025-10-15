@@ -20,11 +20,24 @@ pub struct RenderData {
     pub color: u32,
     pub visible: bool,
     pub layer: RenderLayer,
+    pub player_is_moving: bool,
+    pub player_last_movement: Vec3,
+    pub player_on_raft: bool,
 }
 
 impl RenderData {
     pub fn new(world_position: Vec3, size: f32, color: u32) -> Self {
-        Self { screen_position: None, world_position, size, color, visible: true, layer: RenderLayer::Entity }
+        Self { 
+            screen_position: None, 
+            world_position, 
+            size, 
+            color, 
+            visible: true, 
+            layer: RenderLayer::Entity,
+            player_is_moving: false,
+            player_last_movement: Vec3::zero(),
+            player_on_raft: false,
+        }
     }
     pub fn with_layer(mut self, layer: RenderLayer) -> Self {
         self.layer = layer;
@@ -92,13 +105,34 @@ impl Entity {
     }
     pub fn set_world_position(&mut self, pos: Vec3) {
         match self {
-            Entity::Player(e) => { e.player.pos = pos; }
-            Entity::Raft(e) => { e.raft.center = pos; }
-            Entity::Fish(e) => { e.position = pos; }
-            Entity::Monster(e) => { e.position = pos; }
-            Entity::FloatingItem(e) => { e.position = pos; }
-            Entity::Particle(e) => { e.position = pos; }
-            Entity::Hook(e) => { e.hook.position = pos; }
+            Entity::Player(e) => { 
+                e.player.pos = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::Raft(e) => { 
+                e.raft.center = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::Fish(e) => { 
+                e.position = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::Monster(e) => { 
+                e.position = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::FloatingItem(e) => { 
+                e.position = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::Particle(e) => { 
+                e.position = pos;
+                e.render_data.world_position = pos;
+            }
+            Entity::Hook(e) => { 
+                e.hook.position = pos;
+                e.render_data.world_position = pos;
+            }
         }
     }
 
@@ -111,6 +145,18 @@ impl Entity {
             Entity::FloatingItem(e) => e.render_data.clone(),
             Entity::Particle(e) => e.render_data.clone(),
             Entity::Hook(e) => e.render_data.clone(),
+        }
+    }
+    
+    pub fn update_render_data(&mut self, render_data: RenderData) {
+        match self {
+            Entity::Player(e) => { e.render_data = render_data; }
+            Entity::Raft(e) => { e.render_data = render_data; }
+            Entity::Fish(e) => { e.render_data = render_data; }
+            Entity::Monster(e) => { e.render_data = render_data; }
+            Entity::FloatingItem(e) => { e.render_data = render_data; }
+            Entity::Particle(e) => { e.render_data = render_data; }
+            Entity::Hook(e) => { e.render_data = render_data; }
         }
     }
 

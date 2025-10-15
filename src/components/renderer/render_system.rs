@@ -91,6 +91,33 @@ impl RenderSystem {
         }
     }
     
+    /// Add player entity with movement data
+    pub fn add_player_entity(&mut self, entity: &Entity, is_moving: bool, last_movement: &crate::math::Vec3) {
+        let mut render_data = entity.get_render_data();
+        let entity_type = entity.get_entity_type();
+        
+        // Store player movement data for rendering
+        if let EntityType::Player = entity_type {
+            // Store movement data in render data for player sprite selection
+            render_data.player_is_moving = is_moving;
+            render_data.player_last_movement = *last_movement;
+        }
+        
+        // Project world position into current view
+        let world_pos = entity.get_world_position();
+        render_data.screen_position = match self.view_mode {
+            RenderViewMode::TopDown => Some((world_pos.x, world_pos.y)),
+            RenderViewMode::SideScroll => Some((world_pos.x, -world_pos.z)),
+        };
+        if render_data.visible {
+            let command = RenderCommand::Entity {
+                data: render_data.clone(),
+                entity_type,
+            };
+            self.render_queue.push(command);
+        }
+    }
+    
     /// Add background layer
     pub fn add_background_layer(&mut self, layer: BackgroundLayer) {
         self.background_layers.push(layer);
@@ -115,7 +142,7 @@ impl RenderSystem {
         // Clear screen
         self.clear_screen();
         
-        // Sort render queue by layer
+        // Sort render queue by layer, ensuring player renders on top
         self.render_queue.sort_by(|a, b| {
             let layer_a = match a {
                 RenderCommand::Entity { data, .. } => data.layer,
@@ -127,23 +154,32 @@ impl RenderSystem {
                 RenderCommand::Background { layer, .. } => *layer,
                 RenderCommand::UI { layer, .. } => *layer,
             };
-            // Force player and raft to render on top
-            let bias = |layer: RenderLayer, cmd: &RenderCommand| -> i32 {
-                match cmd {
-                    RenderCommand::Entity { entity_type, .. } => match entity_type {
-                        EntityType::Player => 2,
-                        EntityType::Raft => 1,
-                        _ => 0,
-                    },
+            
+            // Get entity type for priority calculation
+            let entity_priority_a = match a {
+                RenderCommand::Entity { entity_type, .. } => match entity_type {
+                    EntityType::Player => 100, // Highest priority
+                    EntityType::Raft => 50,
                     _ => 0,
-                }
+                },
+                _ => 0,
             };
-            let ord = layer_a.cmp(&layer_b);
-            if ord == std::cmp::Ordering::Equal {
-                let ba = bias(layer_a, a);
-                let bb = bias(layer_b, b);
-                ba.cmp(&bb)
-            } else { ord }
+            let entity_priority_b = match b {
+                RenderCommand::Entity { entity_type, .. } => match entity_type {
+                    EntityType::Player => 100, // Highest priority
+                    EntityType::Raft => 50,
+                    _ => 0,
+                },
+                _ => 0,
+            };
+            
+            // First sort by entity priority (player on top)
+            if entity_priority_a != entity_priority_b {
+                return entity_priority_a.cmp(&entity_priority_b);
+            }
+            
+            // Then sort by layer
+            layer_a.cmp(&layer_b)
         });
         
         // Render background layers
@@ -311,7 +347,7 @@ impl RenderSystem {
             screen_y > -data.size && screen_y < screen_h as f32 + data.size {
                 match entity_type {
                     EntityType::Player => {
-                        self.render_player(screen_x, screen_y, data);
+                        self.render_player(data);
                     },
                     EntityType::Raft => {
                         self.render_raft(screen_x, screen_y, data);
@@ -344,64 +380,79 @@ impl RenderSystem {
     }
     
     /// Render player
-    fn render_player(&self, x: f32, y: f32, data: &RenderData) {
-        let player_color = data.color;
-        
-        // Main body (10x12 pixels)
-        rect!(
-            x = x - 5.0,
-            y = y - 6.0,
-            w = 10.0,
-            h = 12.0,
-            color = player_color,
-            fixed = true
-        );
-        
-        // Head (6x6 pixels)
-        rect!(
-            x = x - 3.0,
-            y = y - 12.0,
-            w = 6.0,
-            h = 6.0,
-            color = player_color,
-            fixed = true
-        );
-        
-        // Arms (2x6 pixels each)
-        rect!(
-            x = x - 7.0,
-            y = y - 4.0,
-            w = 2.0,
-            h = 6.0,
-            color = player_color,
-            fixed = true
-        );
-        rect!(
-            x = x + 5.0,
-            y = y - 4.0,
-            w = 2.0,
-            h = 6.0,
-            color = player_color,
-            fixed = true
-        );
-        
-        // Legs (3x6 pixels each)
-        rect!(
-            x = x - 3.0,
-            y = y + 6.0,
-            w = 3.0,
-            h = 6.0,
-            color = player_color,
-            fixed = true
-        );
-        rect!(
-            x = x + 0.0,
-            y = y + 6.0,
-            w = 3.0,
-            h = 6.0,
-            color = player_color,
-            fixed = true
-        );
+    fn render_player(&self, data: &RenderData) {
+        // Determine sprite based on movement, direction, and whether on raft
+        let sprite_name = if data.player_is_moving {
+            // Player is moving, determine direction and raft state
+            let movement = &data.player_last_movement;
+            if movement.y < -0.1 {
+                if data.player_on_raft {
+                    "run_up"
+                } else {
+                    "swim_move_up"
+                }
+            } else if movement.y > 0.1 {
+                if data.player_on_raft {
+                    "run_down"
+                } else {
+                    "swim_move_down"
+                }
+            } else if movement.x < -0.1 {
+                if data.player_on_raft {
+                    "run_left"
+                } else {
+                    "swim_move_left"
+                }
+            } else if movement.x > 0.1 {
+                if data.player_on_raft {
+                    "run_right"
+                } else {
+                    "swim_move_right"
+                }
+            } else {
+                if data.player_on_raft {
+                    "idle_down"
+                } else {
+                    "swim_idle_down"
+                }
+            }
+        } else {
+            // Player is idle, use last movement direction for idle sprite
+            let movement = &data.player_last_movement;
+            if movement.y < -0.1 {
+                if data.player_on_raft {
+                    "idle_up"
+                } else {
+                    "swim_idle_up"
+                }
+            } else if movement.y > 0.1 {
+                if data.player_on_raft {
+                    "idle_down"
+                } else {
+                    "swim_idle_down"
+                }
+            } else if movement.x < -0.1 {
+                if data.player_on_raft {
+                    "idle_left"
+                } else {
+                    "swim_idle_left"
+                }
+            } else if movement.x > 0.1 {
+                if data.player_on_raft {
+                    "idle_right"
+                } else {
+                    "swim_idle_right"
+                }
+            } else {
+                if data.player_on_raft {
+                    "idle_down"
+                } else {
+                    "swim_idle_down"
+                }
+            }
+        };
+        // Try to render player sprite using world coordinates
+        sprite!(sprite_name, position = (data.world_position.x - 40.0, data.world_position.y - 40.0), size = (80.0, 80.0), origin = (40.0, 40.0));
     }
     
     /// Render fish
